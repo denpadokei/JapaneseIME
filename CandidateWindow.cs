@@ -1,6 +1,7 @@
 using System.Text;
 using TMPro;
 using UnityEngine;
+using UnityEngine.UI;
 
 namespace JapaneseIME
 {
@@ -12,18 +13,22 @@ namespace JapaneseIME
     internal static class CandidateWindow
     {
         private const float Distance = 1.4f;
-        private const float VerticalOffset = -0.22f;
-        private const float Scale = 0.0012f;
+        private const float VerticalOffset = -0.20f;
+        private const float Scale = 0.0011f;
+        private const float Width = 620f;
+        private const float LineHeight = 34f;
+        private const int MaxPageSize = 10;
 
-        private static readonly StringBuilder Builder = new StringBuilder(256);
+        private static readonly StringBuilder Builder = new StringBuilder(512);
 
         private static GameObject _root;
+        private static Canvas _canvas;
         private static TextMeshProUGUI _text;
         private static string _lastContent;
 
-        internal static void Show(string[] candidates, int selection)
+        internal static void Show(ImeCandidateList list)
         {
-            if (candidates == null || candidates.Length == 0)
+            if (list.Candidates == null || list.Candidates.Length == 0)
             {
                 Hide();
                 return;
@@ -34,16 +39,23 @@ namespace JapaneseIME
                 return;
             }
 
-            string content = Build(candidates, selection);
-            if (content == _lastContent && _root.activeSelf)
+            int lines;
+            string content = Build(list, out lines);
+            if (content != _lastContent)
             {
-                return;
+                _lastContent = content;
+                _text.text = content;
+
+                RectTransform rect = _root.GetComponent<RectTransform>();
+                rect.sizeDelta = new Vector2(Width, (lines * LineHeight) + 22f);
             }
 
-            _lastContent = content;
-            _text.text = content;
-            Place();
-            _root.SetActive(true);
+            if (!_root.activeSelf)
+            {
+                _root.SetActive(true);
+            }
+
+            FollowCamera();
         }
 
         internal static void Hide()
@@ -56,35 +68,100 @@ namespace JapaneseIME
             }
         }
 
+        /// <summary>
+        /// Keeps the overlay in front of the player. The window is not parented to the
+        /// camera because DontDestroyOnLoad only protects root objects.
+        /// </summary>
+        internal static void FollowCamera()
+        {
+            if (_root == null || !_root.activeSelf)
+            {
+                return;
+            }
+
+            Camera camera = Camera.main;
+            if (camera == null)
+            {
+                return;
+            }
+
+            Transform view = camera.transform;
+            _root.transform.SetPositionAndRotation(
+                view.position + (view.rotation * new Vector3(0f, VerticalOffset, Distance)),
+                view.rotation);
+
+            if (_canvas != null && _canvas.worldCamera != camera)
+            {
+                _canvas.worldCamera = camera;
+            }
+        }
+
         internal static void Destroy()
         {
             if (_root != null)
             {
                 Object.Destroy(_root);
                 _root = null;
+                _canvas = null;
                 _text = null;
                 _lastContent = null;
             }
         }
 
-        private static string Build(string[] candidates, int selection)
+        private static string Build(ImeCandidateList list, out int lines)
         {
-            Builder.Length = 0;
-
-            for (int i = 0; i < candidates.Length; i++)
+            int count = list.Candidates.Length;
+            int start = list.PageStart;
+            int pageSize = list.PageSize > 0 ? list.PageSize : MaxPageSize;
+            if (pageSize > MaxPageSize)
             {
-                if (i > 0)
+                pageSize = MaxPageSize;
+            }
+
+            int end = Mathf.Min(start + pageSize, count);
+            int page = pageSize > 0 ? (start / pageSize) + 1 : 1;
+            int pages = pageSize > 0 ? (count + pageSize - 1) / pageSize : 1;
+
+            Builder.Length = 0;
+            lines = 0;
+
+            if (pages > 1)
+            {
+                Builder.Append("<color=#B8C7D9>候補 ")
+                    .Append(page)
+                    .Append('/')
+                    .Append(pages)
+                    .Append("</color>\n");
+                lines++;
+            }
+
+            for (int i = start; i < end; i++)
+            {
+                if (lines > 0)
                 {
-                    Builder.Append("   ");
+                    Builder.Append('\n');
                 }
 
-                if (i == selection)
+                lines++;
+
+                int number = i - start + 1;
+                if (i == list.Selection)
                 {
-                    Builder.Append('【').Append(candidates[i]).Append('】');
+                    Builder.Append("<color=#FFD54F><b>【")
+                        .Append(number)
+                        .Append(' ')
+                        .Append("<noparse>")
+                        .Append(list.Candidates[i])
+                        .Append("</noparse>")
+                        .Append("】</b></color>");
                 }
                 else
                 {
-                    Builder.Append(candidates[i]);
+                    Builder.Append(number)
+                        .Append(' ')
+                        .Append("<noparse>")
+                        .Append(list.Candidates[i])
+                        .Append("</noparse>");
                 }
             }
 
@@ -103,13 +180,17 @@ namespace JapaneseIME
                 _root = new GameObject("JapaneseIME.Candidates");
                 Object.DontDestroyOnLoad(_root);
 
-                Canvas canvas = _root.AddComponent<Canvas>();
-                canvas.renderMode = RenderMode.WorldSpace;
-                canvas.sortingOrder = 100;
+                _canvas = _root.AddComponent<Canvas>();
+                _canvas.renderMode = RenderMode.WorldSpace;
+                _canvas.sortingOrder = 2000;
 
                 RectTransform rect = _root.GetComponent<RectTransform>();
-                rect.sizeDelta = new Vector2(700f, 90f);
+                rect.sizeDelta = new Vector2(Width, 60f);
                 _root.transform.localScale = Vector3.one * Scale;
+
+                Image background = _root.AddComponent<Image>();
+                background.color = new Color(0.02f, 0.03f, 0.06f, 0.82f);
+                background.raycastTarget = false;
 
                 GameObject textObject = new GameObject("Text");
                 textObject.transform.SetParent(_root.transform, false);
@@ -122,12 +203,15 @@ namespace JapaneseIME
                     _text.font = font;
                 }
 
-                _text.fontSize = 42f;
+                _text.fontSize = 28f;
                 _text.alignment = TextAlignmentOptions.Center;
                 _text.enableWordWrapping = false;
+                _text.overflowMode = TextOverflowModes.Overflow;
                 _text.color = Color.white;
-                _text.outlineWidth = 0.25f;
+                _text.outlineWidth = 0.2f;
                 _text.outlineColor = Color.black;
+                _text.raycastTarget = false;
+                _text.margin = new Vector4(10f, 8f, 10f, 8f);
 
                 RectTransform textRect = textObject.GetComponent<RectTransform>();
                 textRect.anchorMin = Vector2.zero;
@@ -142,22 +226,10 @@ namespace JapaneseIME
             {
                 Plugin.Log?.Error("JapaneseIME candidate overlay failed: " + ex.Message);
                 _root = null;
+                _canvas = null;
+                _text = null;
                 return false;
             }
-        }
-
-        private static void Place()
-        {
-            Camera camera = Camera.main;
-            if (camera == null)
-            {
-                return;
-            }
-
-            Transform view = camera.transform;
-            _root.transform.position =
-                view.position + (view.forward * Distance) + (view.up * VerticalOffset);
-            _root.transform.rotation = view.rotation;
         }
     }
 }

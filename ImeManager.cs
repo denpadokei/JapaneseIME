@@ -268,12 +268,13 @@ namespace JapaneseIME
                 UpdateSelfTestHotkeys();
             }
 
-            PollCandidates();
-
             if (_target == null)
             {
+                CandidateWindow.Hide();
                 return;
             }
+
+            PollCandidates();
 
             try
             {
@@ -294,6 +295,7 @@ namespace JapaneseIME
                 HandlePhysicalInput();
                 ApplyPendingEdits();
                 ReassertPreview();
+                CandidateWindow.FollowCamera();
 
                 // Moving the IME composition window while a composition is live
                 // makes the OS IME commit it, which turns every key press into an
@@ -318,6 +320,7 @@ namespace JapaneseIME
         }
 
         private float _nextCandidatePollTime;
+        private bool _candidateListVisible;
 
         /// <summary>
         /// Mirrors the Windows IME candidate list into world space. The OS candidate
@@ -327,6 +330,7 @@ namespace JapaneseIME
         {
             if (!Plugin.Config.ShowCandidatesInGame)
             {
+                CandidateWindow.Hide();
                 return;
             }
 
@@ -335,20 +339,37 @@ namespace JapaneseIME
                 return;
             }
 
-            _nextCandidatePollTime = Time.unscaledTime + 0.1f;
+            _nextCandidatePollTime = Time.unscaledTime + 0.05f;
 
             IntPtr hwnd = ImeSwitcher.OwnWindow();
 
-            string[] candidates;
-            int selection;
-            if (ImeCandidates.TryRead(hwnd, out candidates, out selection))
+            ImeCandidateList candidates;
+            bool found = ImeCandidates.TryRead(hwnd, out candidates);
+            if (found)
             {
-                CandidateWindow.Show(candidates, selection);
+                CandidateWindow.Show(candidates);
             }
             else
             {
                 CandidateWindow.Hide();
             }
+
+            if (Plugin.Config.VerboseLogging && found != _candidateListVisible)
+            {
+                if (found)
+                {
+                    Plugin.Log?.Debug(
+                        $"JapaneseIME candidates: {candidates.Candidates.Length} entries, " +
+                        $"page start {candidates.PageStart}, page size {candidates.PageSize}, " +
+                        $"selected {candidates.Selection}.");
+                }
+                else
+                {
+                    Plugin.Log?.Debug("JapaneseIME candidates: list closed.");
+                }
+            }
+
+            _candidateListVisible = found;
         }
 
         private void RefreshKeyboardAttachment()        {
