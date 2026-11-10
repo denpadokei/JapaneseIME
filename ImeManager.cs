@@ -4,6 +4,7 @@ using HMUI;
 using UnityEngine;
 using UnityEngine.InputSystem;
 using UnityEngine.InputSystem.LowLevel;
+using Screen = UnityEngine.Screen;
 
 namespace JapaneseIME
 {
@@ -274,8 +275,6 @@ namespace JapaneseIME
                 return;
             }
 
-            PollCandidates();
-
             try
             {
                 if (!_target.IsAlive || _target.Owner == null)
@@ -283,6 +282,8 @@ namespace JapaneseIME
                     DeactivateInternal(commitComposition: true);
                     return;
                 }
+
+                PollCandidates();
 
                 // While the on-screen keyboard drove the IME host, the plugin owned
                 // the field text and Unity's own IME bridge had to stay out of the way.

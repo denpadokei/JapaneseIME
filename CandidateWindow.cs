@@ -1,4 +1,8 @@
+using System;
 using System.Text;
+using BeatSaberMarkupLanguage;
+using BeatSaberMarkupLanguage.Attributes;
+using BeatSaberMarkupLanguage.FloatingScreen;
 using TMPro;
 using UnityEngine;
 using UnityEngine.UI;
@@ -6,25 +10,45 @@ using UnityEngine.UI;
 namespace JapaneseIME
 {
     /// <summary>
-    /// Draws the Windows IME candidate list inside the game. The OS candidate window
-    /// is a desktop window, so it is invisible in a headset; this puts the same list
-    /// in world space in front of the player.
+    /// Draws the Windows IME candidate list inside the game with BSML. The OS
+    /// candidate window is a desktop window, so it is invisible in a headset; this
+    /// puts the same list on a floating screen in front of the player.
     /// </summary>
     internal static class CandidateWindow
     {
         private const float Distance = 1.4f;
         private const float VerticalOffset = -0.20f;
-        private const float Scale = 0.0011f;
-        private const float Width = 620f;
-        private const float LineHeight = 34f;
+
+        // FloatingScreen units (its transform scale is 0.02): 34 x n units is
+        // 0.68 x 0.02n metres in world space.
+        private const float ScreenWidth = 34f;
+        private const float MinScreenHeight = 7f;
+        private const float Padding = 4f;
+        private const float LineHeight = 2.0f;
         private const int MaxPageSize = 10;
+
+        private const string Layout =
+            "<vertical id='root' bg='round-rect-panel' bg-color='#000000' bg-alpha='0.85' " +
+            "pad='2' spacing='0' child-align='MiddleCenter' " +
+            "horizontal-fit='Unconstrained' vertical-fit='Unconstrained'>" +
+            "<text id='candidateText' align='Center' font-size='1.5' color='#FFFFFF' " +
+            "outline-color='#000000' outline-width='0.15' " +
+            "word-wrapping='false' overflow-mode='Overflow'/>" +
+            "</vertical>";
 
         private static readonly StringBuilder Builder = new StringBuilder(512);
 
-        private static GameObject _root;
+        private static FloatingScreen _screen;
         private static Canvas _canvas;
         private static TextMeshProUGUI _text;
         private static string _lastContent;
+        private static float _nextCreateAttemptTime;
+
+        private sealed class View
+        {
+            [UIComponent("candidateText")]
+            internal TextMeshProUGUI Text = null;
+        }
 
         internal static void Show(ImeCandidateList list)
         {
@@ -46,13 +70,13 @@ namespace JapaneseIME
                 _lastContent = content;
                 _text.text = content;
 
-                RectTransform rect = _root.GetComponent<RectTransform>();
-                rect.sizeDelta = new Vector2(Width, (lines * LineHeight) + 22f);
+                float height = Mathf.Max(MinScreenHeight, Padding + (lines * LineHeight));
+                _screen.ScreenSize = new Vector2(ScreenWidth, height);
             }
 
-            if (!_root.activeSelf)
+            if (!_screen.gameObject.activeSelf)
             {
-                _root.SetActive(true);
+                _screen.gameObject.SetActive(true);
             }
 
             FollowCamera();
@@ -62,19 +86,19 @@ namespace JapaneseIME
         {
             _lastContent = null;
 
-            if (_root != null && _root.activeSelf)
+            if (_screen != null && _screen.gameObject.activeSelf)
             {
-                _root.SetActive(false);
+                _screen.gameObject.SetActive(false);
             }
         }
 
         /// <summary>
-        /// Keeps the overlay in front of the player. The window is not parented to the
-        /// camera because DontDestroyOnLoad only protects root objects.
+        /// Keeps the screen in front of the player. It is not parented to the camera
+        /// because DontDestroyOnLoad only protects root objects.
         /// </summary>
         internal static void FollowCamera()
         {
-            if (_root == null || !_root.activeSelf)
+            if (_screen == null || !_screen.gameObject.activeSelf)
             {
                 return;
             }
@@ -86,7 +110,7 @@ namespace JapaneseIME
             }
 
             Transform view = camera.transform;
-            _root.transform.SetPositionAndRotation(
+            _screen.transform.SetPositionAndRotation(
                 view.position + (view.rotation * new Vector3(0f, VerticalOffset, Distance)),
                 view.rotation);
 
@@ -98,14 +122,15 @@ namespace JapaneseIME
 
         internal static void Destroy()
         {
-            if (_root != null)
+            if (_screen != null)
             {
-                Object.Destroy(_root);
-                _root = null;
-                _canvas = null;
-                _text = null;
-                _lastContent = null;
+                UnityEngine.Object.Destroy(_screen.gameObject);
             }
+
+            _screen = null;
+            _canvas = null;
+            _text = null;
+            _lastContent = null;
         }
 
         private static string Build(ImeCandidateList list, out int lines)
@@ -170,32 +195,59 @@ namespace JapaneseIME
 
         private static bool EnsureCreated()
         {
-            if (_root != null)
+            if (_screen != null)
             {
                 return true;
             }
 
+            if (Time.unscaledTime < _nextCreateAttemptTime)
+            {
+                return false;
+            }
+
+            _nextCreateAttemptTime = Time.unscaledTime + 1f;
+
+            BSMLParser parser;
             try
             {
-                _root = new GameObject("JapaneseIME.Candidates");
-                Object.DontDestroyOnLoad(_root);
+                parser = BSMLParser.Instance;
+            }
+            catch (InvalidOperationException)
+            {
+                return false;
+            }
 
-                _canvas = _root.AddComponent<Canvas>();
-                _canvas.renderMode = RenderMode.WorldSpace;
-                _canvas.sortingOrder = 2000;
+            try
+            {
+                Camera camera = Camera.main;
+                Vector3 position = camera != null
+                    ? camera.transform.position +
+                      (camera.transform.rotation * new Vector3(0f, VerticalOffset, Distance))
+                    : Vector3.zero;
+                Quaternion rotation = camera != null ? camera.transform.rotation : Quaternion.identity;
 
-                RectTransform rect = _root.GetComponent<RectTransform>();
-                rect.sizeDelta = new Vector2(Width, 60f);
-                _root.transform.localScale = Vector3.one * Scale;
+                _screen = FloatingScreen.CreateFloatingScreen(
+                    new Vector2(ScreenWidth, MinScreenHeight),
+                    false,
+                    position,
+                    rotation);
+                _screen.gameObject.name = "JapaneseIME.Candidates";
+                UnityEngine.Object.DontDestroyOnLoad(_screen.gameObject);
 
-                Image background = _root.AddComponent<Image>();
-                background.color = new Color(0.02f, 0.03f, 0.06f, 0.82f);
-                background.raycastTarget = false;
+                _canvas = _screen.GetComponent<Canvas>();
+                if (_canvas != null)
+                {
+                    _canvas.sortingOrder = 2000;
+                }
 
-                GameObject textObject = new GameObject("Text");
-                textObject.transform.SetParent(_root.transform, false);
+                View view = new View();
+                parser.Parse(Layout, _screen.gameObject, view);
 
-                _text = textObject.AddComponent<TextMeshProUGUI>();
+                _text = view.Text;
+                if (_text == null)
+                {
+                    throw new InvalidOperationException("candidate text element was not created");
+                }
 
                 TMP_FontAsset font = Fonts.Japanese(_text.font);
                 if (font != null)
@@ -203,29 +255,25 @@ namespace JapaneseIME
                     _text.font = font;
                 }
 
-                _text.fontSize = 28f;
-                _text.alignment = TextAlignmentOptions.Center;
-                _text.enableWordWrapping = false;
-                _text.overflowMode = TextOverflowModes.Overflow;
-                _text.color = Color.white;
-                _text.outlineWidth = 0.2f;
-                _text.outlineColor = Color.black;
-                _text.raycastTarget = false;
-                _text.margin = new Vector4(10f, 8f, 10f, 8f);
+                // The overlay must never steal the VR pointer from the game's UI.
+                foreach (Graphic graphic in _screen.GetComponentsInChildren<Graphic>(true))
+                {
+                    graphic.raycastTarget = false;
+                }
 
-                RectTransform textRect = textObject.GetComponent<RectTransform>();
-                textRect.anchorMin = Vector2.zero;
-                textRect.anchorMax = Vector2.one;
-                textRect.offsetMin = Vector2.zero;
-                textRect.offsetMax = Vector2.zero;
-
-                _root.SetActive(false);
+                _screen.gameObject.SetActive(false);
                 return true;
             }
-            catch (System.Exception ex)
+            catch (Exception ex)
             {
-                Plugin.Log?.Error("JapaneseIME candidate overlay failed: " + ex.Message);
-                _root = null;
+                Plugin.Log?.Error("JapaneseIME candidate overlay failed: " + ex);
+
+                if (_screen != null)
+                {
+                    UnityEngine.Object.Destroy(_screen.gameObject);
+                }
+
+                _screen = null;
                 _canvas = null;
                 _text = null;
                 return false;

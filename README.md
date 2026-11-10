@@ -19,6 +19,7 @@ Beat Saber のゲーム内キーボードで、Windows の日本語 IME を使�
 | --- | --- |
 | Beat Saber | **1.40.8** (PC / Steam・Oculus・BSManager) |
 | Mod loader | BSIPA 4.3.6 以上 |
+| UI | Beat Saber Markup Language (BSML) **1.12.5 以上** |
 | OS | Windows 10 / 11 |
 | 入力 | 物理キーボード + 日本語 IME |
 | 表示 | 日本語フォント。**SiraLocalizer** を入れると確実です |
@@ -31,7 +32,9 @@ Beat Saber のゲーム内キーボードで、Windows の日本語 IME を使�
 
 1. Beat Saber を終了します。
 2. `JapaneseIME.dll` を `Beat Saber\Plugins\` にコピーします。
-3. ゲームを起動します。BSIPA のログに次のように出ればロード成功です。
+3. **BSML** (`BSML.dll`) が `Plugins` にない場合は導入します。Mod Assistant / BSManager では
+   マニフェストの依存として自動導入されます。
+4. ゲームを起動します。BSIPA のログに次のように出ればロード成功です。
 
 ```text
 [Japanese IME] JapaneseIME started: Windows IME input is enabled for in-game text fields.
@@ -135,6 +138,7 @@ Windows の IME 候補ウィンドウ自体はデスクトップ（モニター�
 - 入力欄を開いた直後に Windows IME を日本語（`IME_CMODE_NATIVE | IME_CMODE_FULLSHAPE | IME_CMODE_ROMAN`）へ切り替えます。Unity は IME の「入力受付」を有効にするだけで、かな入力モードまでは選ばないため、この処理がないと `a` が半角の `a` のままになります。
 - Unity Input System の `Keyboard.onIMECompositionChange` で変換中文字列を取得し、`Keyboard.onTextInput` で確定文字を取得します。
 - 変換中はゲームの入力欄表示に未確定文字を反映し、確定時にゲーム標準の `onValueChanged` を呼ぶことで、検索などのゲーム側処理に確定文字を渡します。
+- 変換候補の一覧は BSML の `FloatingScreen` 上に構築し、候補ページの変化に合わせてテキストとパネルサイズを更新します。
 - Input System が利用できない場合は、従来の `Input.compositionString` / `Input.inputString` にフォールバックします。
 - 旧 `VRTextEntryController` + `UIKeyboard` を使う画面にも対応しています。
 - ゲーム内キーボードのキー入力は横取りしません（ポインタ入力は対象外）。追加したモード切替キーだけが
