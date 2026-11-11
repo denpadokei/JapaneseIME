@@ -156,7 +156,7 @@ namespace JapaneseIME
             return character >= 'a' && character <= 'z' && !IsVowel(character) && character != 'n';
         }
 
-        private static string ToKatakana(string value)
+        internal static string ToKatakana(string value)
         {
             char[] chars = value.ToCharArray();
             for (int i = 0; i < chars.Length; i++)
@@ -169,6 +169,22 @@ namespace JapaneseIME
                 else if (c == '\u3094')
                 {
                     chars[i] = '\u30F4';
+                }
+            }
+
+            return new string(chars);
+        }
+
+        /// <summary>Converts katakana to hiragana so candidates can be offered in both.</summary>
+        internal static string ToHiragana(string value)
+        {
+            char[] chars = value.ToCharArray();
+            for (int i = 0; i < chars.Length; i++)
+            {
+                char c = chars[i];
+                if (c >= '\u30A1' && c <= '\u30F6')
+                {
+                    chars[i] = (char)(c - 0x60);
                 }
             }
 
