@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.Text;
 using HMUI;
 using UnityEngine;
@@ -312,20 +313,36 @@ namespace JapaneseIME
 
         private static string[] BuildConversionCandidates(string reading)
         {
-            string kanji;
-            string katakana = RomajiKana.ToKatakana(reading);
-            string hiragana = RomajiKana.ToHiragana(reading);
+            List<string> candidates = new List<string>(4);
 
-            bool hasKanji = KanjiConverter.TryConvert(reading, out kanji) &&
-                            !string.IsNullOrEmpty(kanji) &&
-                            kanji != reading;
-
-            if (hasKanji)
+            string[] converted;
+            if (KanjiConverter.TryConvert(reading, out converted) && converted != null)
             {
-                return new[] { kanji, katakana, hiragana };
+                for (int i = 0; i < converted.Length; i++)
+                {
+                    AddCandidate(candidates, converted[i], reading);
+                }
             }
 
-            return katakana == hiragana ? new[] { hiragana } : new[] { katakana, hiragana };
+            AddCandidate(candidates, RomajiKana.ToKatakana(reading), string.Empty);
+            AddCandidate(candidates, RomajiKana.ToHiragana(reading), string.Empty);
+
+            if (candidates.Count == 0)
+            {
+                candidates.Add(reading);
+            }
+
+            return candidates.ToArray();
+        }
+
+        private static void AddCandidate(List<string> candidates, string value, string reading)
+        {
+            if (string.IsNullOrEmpty(value) || value == reading || candidates.Contains(value))
+            {
+                return;
+            }
+
+            candidates.Add(value);
         }
 
         private void ShowPointerCandidates()
@@ -360,6 +377,8 @@ namespace JapaneseIME
                 _baseText = AppendClamped(_baseText, selected, _target.MaxLength);
             }
 
+            // The reading was replaced by the candidate, so it must not be shown again.
+            _keyboardReading = string.Empty;
             ClearConversion();
         }
 
