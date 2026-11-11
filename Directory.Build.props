@@ -4,5 +4,12 @@
   <PropertyGroup>
     <ImportBSMTTargets>True</ImportBSMTTargets>
     <BSMTProjectType>BSIPA</BSMTProjectType>
+    <!-- Keep in sync with manifest.json. CI resolves references from these values. -->
+    <GameVersion>1.40.8</GameVersion>
   </PropertyGroup>
+  <ItemGroup>
+    <!-- Exact versions so CI downloads the builds this project was tested with. -->
+    <DependsOn Include="BSIPA" Version="4.3.6" />
+    <DependsOn Include="BeatSaberMarkupLanguage" Version="1.12.5" />
+  </ItemGroup>
 </Project>

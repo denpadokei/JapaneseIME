@@ -24,14 +24,13 @@ jobs:
     steps:
       - uses: actions/checkout@v7
 
-      # Reads manifest.json (gameVersion 1.40.8, dependsOn BSIPA + BSML) and
-      # downloads the reference assemblies and those dependencies from BeatMods.
+      # Reads GameVersion and the DependsOn items from the project, then downloads
+      # the 1.40.8 reference assemblies and BSIPA/BSML from BeatMods.
       # It exports BeatSaberDir/GameDirectory for the build.
       - name: Set up Beat Saber references
-        uses: nicoco007/setup-beat-saber@v1
+        uses: nicoco007/setup-beat-saber@v1.2.3
         with:
-          access-token: ${{ secrets.GITHUB_TOKEN }}
-          manifest: ${{ github.workspace }}\manifest.json
+          project-path: ${{ github.workspace }}\Japanese_IME.csproj
 
       - name: Verify Beat Saber references
         shell: pwsh
