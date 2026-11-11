@@ -313,19 +313,39 @@ namespace JapaneseIME
 
         private static string[] BuildConversionCandidates(string reading)
         {
-            List<string> candidates = new List<string>(8);
+            List<string> candidates = new List<string>(10);
 
+            // 1) Google's CGI API first. A cache miss starts a background request and
+            //    the list is refreshed as soon as the answer arrives.
+            if (Plugin.Config.UseOnlineDictionary)
+            {
+                string[] online;
+                if (OnlineDictionary.TryGet(reading, out online) && online != null)
+                {
+                    int limit = online.Length < 4 ? online.Length : 4;
+                    for (int i = 0; i < limit && candidates.Count < 6; i++)
+                    {
+                        AddCandidate(candidates, online[i], reading);
+                    }
+                }
+                else
+                {
+                    OnlineDictionary.Request(reading);
+                }
+            }
+
+            // 2) The Microsoft IME engine inside the game process.
             string[] converted;
             if (KanjiConverter.TryConvert(reading, out converted) && converted != null)
             {
-                for (int i = 0; i < converted.Length; i++)
+                for (int i = 0; i < converted.Length && candidates.Count < 6; i++)
                 {
                     AddCandidate(candidates, converted[i], reading);
                 }
             }
 
-            // The engine returns the best conversion per context; the dictionary
-            // adds the homophones it never picks (かみ → 神 / 紙 / 髪).
+            // 3) The built-in JMdict table fills in the homophones the engine never
+            //    picks (かみ → 神 / 紙 / 髪) and covers offline sessions.
             string[] known;
             if (KanjiDictionary.TryLookup(reading, out known) && known != null)
             {
@@ -357,8 +377,35 @@ namespace JapaneseIME
             candidates.Add(value);
         }
 
-        private void ShowPointerCandidates()
+        /// <summary>
+        /// The online dictionary answered while a reading is still being converted:
+        /// rebuild the list so its candidates can be picked without another key press.
+        /// </summary>
+        private void RefreshConversionWithOnline(OnlineDictionary.Result result)
         {
+            if (result == null || _conversionCandidates == null || string.IsNullOrEmpty(_keyboardReading) ||
+                !string.Equals(result.Reading, _keyboardReading, StringComparison.Ordinal))
+            {
+                return;
+            }
+
+            string[] refreshed = BuildConversionCandidates(_keyboardReading);
+            if (refreshed == null || refreshed.Length == 0)
+            {
+                return;
+            }
+
+            _conversionCandidates = refreshed;
+            if (_conversionIndex >= _conversionCandidates.Length)
+            {
+                _conversionIndex = 0;
+            }
+
+            ShowPointerCandidates();
+            RefreshDisplay(notify: true, force: true);
+        }
+
+        private void ShowPointerCandidates()        {
             if (!Plugin.Config.ShowCandidatesInGame || _conversionCandidates == null)
             {
                 return;
@@ -755,6 +802,12 @@ namespace JapaneseIME
                 else if (ImeMessageHook.TryTakePendingHide())
                 {
                     CandidateWindow.Hide();
+                }
+
+                OnlineDictionary.Result onlineResult;
+                if (OnlineDictionary.TryTakeCompleted(out onlineResult))
+                {
+                    RefreshConversionWithOnline(onlineResult);
                 }
 
                 // While the on-screen keyboard drove the IME host, the plugin owned

@@ -58,6 +58,13 @@ namespace JapaneseIME
         public virtual bool ConvertOnScreenKeyboard { get; set; } = true;
 
         /// <summary>
+        /// Ask Google's CGI API for Japanese input for the conversion candidates and
+        /// fall back to the built-in JMdict table when it is unavailable. The reading
+        /// is sent to google.com over HTTPS.
+        /// </summary>
+        public virtual bool UseOnlineDictionary { get; set; } = true;
+
+        /// <summary>
         /// Send the keystroke an on-screen key stands for so the Windows IME converts
         /// it like physical typing. Off by default: the game commits the IME
         /// composition on every UI click, so a tap can only produce one character and
