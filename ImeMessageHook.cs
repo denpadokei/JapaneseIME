@@ -13,6 +13,7 @@ namespace JapaneseIME
     internal static class ImeMessageHook
     {
         private const int GwlWndProc = -4;
+        private const int WmImeSetContext = 0x0281;
         private const int WmImeNotify = 0x0282;
         private const int ImnChangeCandidate = 0x0003;
         private const int ImnCloseCandidate = 0x0004;
@@ -206,6 +207,18 @@ namespace JapaneseIME
             {
                 // Never hand the message back to our own hook; that recursed forever.
                 return DefWindowProcW(hWnd, msg, wParam, lParam);
+            }
+
+            if (msg == WmImeSetContext)
+            {
+                if (Plugin.Config.ShowCandidatesInGame && _handlerDepth < MaxHandlerDepth)
+                {
+                    // Do not let the IME draw its composition/candidate windows over
+                    // the game: everything is mirrored into the in-game overlay.
+                    lParam = IntPtr.Zero;
+                }
+
+                return CallWindowProcW(original, hWnd, msg, wParam, lParam);
             }
 
             if (msg != WmImeNotify || _handlerDepth >= MaxHandlerDepth)

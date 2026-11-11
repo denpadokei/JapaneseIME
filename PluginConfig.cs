@@ -59,10 +59,11 @@ namespace JapaneseIME
 
         /// <summary>
         /// Send the keystroke an on-screen key stands for so the Windows IME converts
-        /// it like physical typing (kanji included). Falls back to the romaji converter
-        /// when synthetic input does not reach the IME.
+        /// it like physical typing. Off by default: the game commits the IME
+        /// composition on every UI click, so a tap can only produce one character and
+        /// never a convertible reading. The built-in romaji converter is used instead.
         /// </summary>
-        public virtual bool SimulatePhysicalKeyboard { get; set; } = true;
+        public virtual bool SimulatePhysicalKeyboard { get; set; } = false;
 
         /// <summary>
         /// Width of the extra IME mode key, as a multiple of a normal letter key. It
