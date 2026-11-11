@@ -31,6 +31,7 @@ namespace JapaneseIME
         private Keyboard _keyboard;
         private string _baseText = string.Empty;
         private string _composition = string.Empty;
+        private string _keyboardRomaji = string.Empty;
         private string _lastPreview;
         private bool _sawInputSystemComposition;
         private bool _sawInputSystemText;
@@ -138,6 +139,7 @@ namespace JapaneseIME
             _target = target;
             _baseText = target.ReadText() ?? string.Empty;
             _composition = string.Empty;
+            _keyboardRomaji = string.Empty;
             _lastPreview = null;
             _lastTextInputFrame = -1;
             _lastCompositionFrame = -1;
@@ -161,6 +163,145 @@ namespace JapaneseIME
 
             Plugin.Log?.Info(
                 $"JapaneseIME activated for '{target.FieldName}' (maxLength={target.MaxLength}).");
+        }
+
+        /// <summary>
+        /// Handles a character typed on the game's on-screen (VR pointer) keyboard.
+        /// Those keys write straight into the field, so the Windows IME never sees
+        /// them; while the IME is in a Japanese mode the romaji is converted here.
+        /// Returns true when the game must not also insert the raw character.
+        /// </summary>
+        internal bool TryHandleGameKeyboardChar(InputFieldView field, char letter)
+        {
+            if (!Plugin.Config.ConvertOnScreenKeyboard || letter == '\0')
+            {
+                return false;
+            }
+
+            if (_target == null || field == null || _target.Owner != field || !_target.IsAlive)
+            {
+                return false;
+            }
+
+            try
+            {
+                if (!IsJapaneseInputMode())
+                {
+                    FlushKeyboardRomaji(_target);
+                    return false;
+                }
+
+                int maxLength = _target.MaxLength;
+                if (maxLength > 0 &&
+                    _baseText.Length + _composition.Length + _keyboardRomaji.Length >= maxLength)
+                {
+                    // Same as the game's own keyboard: a full field swallows the key.
+                    return true;
+                }
+
+                if (RomajiKana.IsRomajiChar(letter))
+                {
+                    _keyboardRomaji += char.ToLowerInvariant(letter);
+
+                    string produced;
+                    string remaining;
+                    RomajiKana.Convert(_keyboardRomaji, IsKatakanaMode(), false, out produced, out remaining);
+
+                    _keyboardRomaji = remaining;
+                    if (produced.Length > 0)
+                    {
+                        _baseText = AppendClamped(_baseText, produced, _target.MaxLength);
+                    }
+                }
+                else
+                {
+                    // Space, digits and other symbols end the pending syllable.
+                    FlushKeyboardRomaji(_target);
+                    _baseText = AppendClamped(_baseText, letter.ToString(), _target.MaxLength);
+                }
+
+                RefreshDisplay(notify: true, force: true);
+                return true;
+            }
+            catch (Exception ex)
+            {
+                LogError(ex);
+                return false;
+            }
+        }
+
+        /// <summary>
+        /// Removes one pending romaji character. Returns false when there is nothing
+        /// pending so the game can delete from the field as usual.
+        /// </summary>
+        internal bool TryHandleGameKeyboardBackspace(InputFieldView field)
+        {
+            if (_target == null || field == null || _target.Owner != field)
+            {
+                return false;
+            }
+
+            if (_keyboardRomaji.Length == 0)
+            {
+                return false;
+            }
+
+            try
+            {
+                _keyboardRomaji = _keyboardRomaji.Substring(0, _keyboardRomaji.Length - 1);
+                RefreshDisplay(notify: true, force: true);
+                return true;
+            }
+            catch (Exception ex)
+            {
+                LogError(ex);
+                return false;
+            }
+        }
+
+        private bool IsJapaneseInputMode()
+        {
+            bool open;
+            int conversion;
+            return ImeSwitcher.TryGetConversionFor(ImeSwitcher.OwnWindow(), out open, out conversion) &&
+                   open &&
+                   (conversion & ImeSwitcher.ImeCmodeNative) != 0;
+        }
+
+        private bool IsKatakanaMode()
+        {
+            bool open;
+            int conversion;
+            return ImeSwitcher.TryGetConversionFor(ImeSwitcher.OwnWindow(), out open, out conversion) &&
+                   (conversion & ImeSwitcher.ImeCmodeKatakana) != 0;
+        }
+
+        /// <summary>
+        /// Converts any pending romaji into kana and folds it into the committed text.
+        /// </summary>
+        private void FlushKeyboardRomaji(IImeTarget target)
+        {
+            if (_keyboardRomaji.Length == 0)
+            {
+                return;
+            }
+
+            string pending = _keyboardRomaji;
+            _keyboardRomaji = string.Empty;
+
+            if (target == null)
+            {
+                return;
+            }
+
+            string produced;
+            string remaining;
+            RomajiKana.Convert(pending, IsKatakanaMode(), true, out produced, out remaining);
+
+            if (produced.Length > 0)
+            {
+                _baseText = AppendClamped(_baseText, produced, target.MaxLength);
+            }
         }
 
         internal void Deactivate(IImeTarget target)
@@ -188,6 +329,7 @@ namespace JapaneseIME
             {
                 HandlePhysicalInput();
                 ApplyPendingEdits();
+                FlushKeyboardRomaji(_target);
 
                 if (_composition.Length > 0)
                 {
@@ -212,6 +354,7 @@ namespace JapaneseIME
 
             if (target == null)
             {
+                _keyboardRomaji = string.Empty;
                 DetachKeyboard();
                 DisableIme();
                 return;
@@ -223,6 +366,7 @@ namespace JapaneseIME
                 // target is cleared before the final notification so a game callback
                 // cannot re-enter this manager.
                 ApplyPendingEditsToBase(target);
+                FlushKeyboardRomaji(target);
 
                 bool hadComposition = _composition.Length > 0;
                 if (commitComposition && hadComposition)
@@ -1003,7 +1147,7 @@ namespace JapaneseIME
                 return;
             }
 
-            string preview = _baseText + _composition;
+            string preview = _baseText + _composition + _keyboardRomaji;
             string actual;
             try
             {
@@ -1041,6 +1185,7 @@ namespace JapaneseIME
                 }
 
                 _baseText = actual;
+                _keyboardRomaji = string.Empty;
                 _lastPreview = actual;
             }
         }
@@ -1052,7 +1197,7 @@ namespace JapaneseIME
                 return;
             }
 
-            string preview = _baseText + _composition;
+            string preview = _baseText + _composition + _keyboardRomaji;
             if (!force && preview == _lastPreview)
             {
                 if (notify)

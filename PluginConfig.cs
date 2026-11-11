@@ -51,6 +51,13 @@ namespace JapaneseIME
         public virtual bool ShowCandidatesInGame { get; set; } = true;
 
         /// <summary>
+        /// Convert romaji typed with the in-game (VR pointer) keyboard into kana while
+        /// the Windows IME is in a Japanese mode. Those keys write characters directly
+        /// into the field, so without this every tap stays half-width ASCII.
+        /// </summary>
+        public virtual bool ConvertOnScreenKeyboard { get; set; } = true;
+
+        /// <summary>
         /// Width of the extra IME mode key, as a multiple of a normal letter key. It
         /// sits in the free strip right of OK. Clamped to 1.0 - 3.0.
         /// </summary>
