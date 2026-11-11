@@ -201,7 +201,6 @@ namespace JapaneseIME
                 throw new FileNotFoundException("helper not found", path);
             }
 
-            UTF8Encoding encoding = new UTF8Encoding(false);
             ProcessStartInfo info = new ProcessStartInfo
             {
                 FileName = path,
