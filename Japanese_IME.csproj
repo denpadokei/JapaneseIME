@@ -14,6 +14,28 @@
     <EmbeddedResource Include="manifest.json"/>
   </ItemGroup>
   <ItemGroup>
+    <!-- The helper is a separate process; it must not be compiled into the plugin. -->
+    <Compile Remove="KanjiHost\**" />
+    <None Remove="KanjiHost\**" />
+  </ItemGroup>
+  <!--
+    Microsoft IME conversion runs in a helper process because Unity's Mono cannot
+    use COM. Build it and add it to the BSMT outputs so it ships next to the DLL.
+  -->
+  <Target Name="JapaneseIME_BuildKanjiHost"
+          BeforeTargets="CopyToArtifactDestination;BSMT_CopyToPlugins;BSMT_ZipRelease">
+    <MSBuild Projects="KanjiHost\JapaneseIME.KanjiHost.csproj"
+             Targets="Restore;Build"
+             Properties="Configuration=$(Configuration)" />
+    <ItemGroup>
+      <OutputCopy Include="$(TargetDir)$(AssemblyName).dll" OutputPath="Plugins\$(AssemblyName).dll" />
+      <OutputCopy Include="$(TargetDir)$(AssemblyName).pdb" OutputPath="Plugins\$(AssemblyName).pdb"
+                  Condition="Exists('$(TargetDir)$(AssemblyName).pdb')" />
+      <OutputCopy Include="KanjiHost\bin\$(Configuration)\JapaneseIME.KanjiHost.exe"
+                  OutputPath="Plugins\JapaneseIME.KanjiHost.exe" />
+    </ItemGroup>
+  </Target>
+  <ItemGroup>
     <PackageReference Include="BeatSaberModdingTools.Tasks" Version="2.0.0-beta4">
       <PrivateAssets>all</PrivateAssets>
       <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>

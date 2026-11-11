@@ -32,7 +32,8 @@ Beat Saber のゲーム内キーボードで、Windows の日本語 IME を使�
 ## インストール
 
 1. Beat Saber を終了します。
-2. `JapaneseIME.dll` を `Beat Saber\Plugins\` にコピーします。
+2. `JapaneseIME.dll` と `JapaneseIME.KanjiHost.exe` を `Beat Saber\Plugins\` にコピーします。
+   （`JapaneseIME.KanjiHost.exe` はポインタ入力の漢字変換に使う補助プログラムです）
 3. **BSML** (`BSML.dll`) が `Plugins` にない場合は導入します。Mod Assistant / BSManager では
    マニフェストの依存として自動導入されます。
 4. ゲームを起動します。BSIPA のログに次のように出ればロード成功です。
@@ -63,10 +64,13 @@ BSManager を使っている場合は、対象インスタンスの `Plugins` �
 4. `OK` / 検索ボタンで確定します。候補表示中に別のキーを押すと、その候補を確定して入力を続けます。
 
 ゲームはキー入力を入力欄へ直接書き込み、しかも UI をクリックするたびに Windows IME の変換中文字列を確定してしまうため、
-Windows IME の変換は使えません。代わりに **Microsoft IME の変換エンジン（`MSIME.Japan`）を直接呼び出して**かなを漢字に変換します。
+Windows IME の変換は使えません。代わりに **Microsoft IME の変換エンジン（`MSIME.Japan`）** を、
+補助プログラム `JapaneseIME.KanjiHost.exe` 経由で呼び出して、かなを漢字に変換します
+（Unity の Mono は COM を直接使えないため、別プロセスにしています）。
 
 - 変換できるのは Microsoft IME の辞書に載っている語です。同音異義語の一覧は取得できないため、候補は
   「変換結果（最大 2 種）・カタカナ・ひらがな」です。`Space` のたびに切り替わります。
+- `JapaneseIME.KanjiHost.exe` が無い場合は、かな入力のみになります（ログに警告が出ます）。
 - かなに変換するのは、IME が日本語モードのときだけです。`半角英数` モードでは従来どおり半角の英数が入ります。
 - `Backspace` は、変換中なら変換を取り消して読みに戻し、未確定のローマ字（例: `k`）があればそれを 1 文字消し、
   なければ入力済みの文字を消します。
@@ -202,4 +206,4 @@ bsmt build .\Japanese_IME.csproj -c Release --package
 
 ## アンインストール
 
-`Plugins\JapaneseIME.dll` を削除し、必要なら `UserData\Japanese IME.json` も削除してください。
+`Plugins\JapaneseIME.dll` と `Plugins\JapaneseIME.KanjiHost.exe` を削除し、必要なら `UserData\Japanese IME.json` も削除してください。

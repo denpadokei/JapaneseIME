@@ -1,39 +1,33 @@
 using System;
 using System.Collections.Generic;
-using System.Runtime.InteropServices;
+using System.Diagnostics;
+using System.IO;
+using System.Text;
 using System.Threading;
 
 namespace JapaneseIME
 {
     /// <summary>
-    /// Converts a kana reading to kanji with the Microsoft IME conversion engine
-    /// (MSIME.Japan / IFELanguage).
+    /// Converts a kana reading to kanji with the Microsoft IME conversion engine.
     ///
     /// Pointer taps cannot use the Windows IME: Beat Saber commits the IME composition
-    /// on every UI click, so a reading can never be accumulated for conversion. Calling
-    /// the IME's conversion engine directly gives the same dictionary without a
-    /// composition. The object is apartment-bound, so all calls run on one STA thread.
+    /// on every UI click, so a reading can never be accumulated for conversion. The IME
+    /// engine is reached through a small helper process because Unity's Mono cannot use
+    /// COM directly.
     /// </summary>
     internal static class KanjiConverter
     {
-        private const uint FelangReqConv = 0x00010000;
-        private const uint FelangCmodeNoInvisibleChar = 0x40000000;
-        private const uint FelangClmnFixr = 0x00000010;
-
-        /// <summary>
-        /// Fixed prefix. Some entries (にほんご -> 日本語) are only in the engine's
-        /// dictionary as part of a sentence, and the context also picks better
-        /// homophones (てんき -> 天気 instead of 転記).
-        /// </summary>
-        private const string Context = "これは";
-
-        private const int TimeoutMilliseconds = 300;
+        private const string HostFileName = "JapaneseIME.KanjiHost.exe";
+        private const int TimeoutMilliseconds = 1500;
 
         private static readonly object Sync = new object();
         private static readonly Queue<Job> Jobs = new Queue<Job>();
 
         private static Thread _thread;
         private static bool _unavailable;
+        private static Process _process;
+        private static StreamWriter _request;
+        private static StreamReader _response;
 
         private sealed class Job
         {
@@ -81,12 +75,37 @@ namespace JapaneseIME
 
             if (!finished)
             {
-                Plugin.Log?.Warn("JapaneseIME: the kanji conversion engine did not answer in time.");
+                Plugin.Log?.Warn("JapaneseIME: the kanji conversion helper did not answer in time.");
+                Shutdown();
+                _unavailable = true;
                 return false;
             }
 
             candidates = job.Result;
             return candidates != null && candidates.Length > 0;
+        }
+
+        /// <summary>Stops the helper process.</summary>
+        internal static void Shutdown()
+        {
+            try
+            {
+                _request?.Close();
+                _response?.Close();
+                if (_process != null && !_process.HasExited)
+                {
+                    _process.Kill();
+                }
+            }
+            catch
+            {
+            }
+            finally
+            {
+                _request = null;
+                _response = null;
+                _process = null;
+            }
         }
 
         private static void EnsureThread()
@@ -109,7 +128,6 @@ namespace JapaneseIME
                     Name = "JapaneseIME.KanjiConverter",
                 };
 
-                thread.SetApartmentState(ApartmentState.STA);
                 thread.Start();
                 _thread = thread;
             }
@@ -117,8 +135,6 @@ namespace JapaneseIME
 
         private static void Worker()
         {
-            IFELanguage language = null;
-
             while (true)
             {
                 Job job;
@@ -135,30 +151,37 @@ namespace JapaneseIME
 
                 try
                 {
-                    if (language == null)
+                    if (_process == null)
                     {
-                        Type type = Type.GetTypeFromProgID("MSIME.Japan", true);
-                        language = (IFELanguage)Activator.CreateInstance(type);
-                        int hr = language.Open();
-                        if (hr < 0)
-                        {
-                            Marshal.ThrowExceptionForHR(hr);
-                        }
+                        StartHost();
                     }
 
-                    job.Result = BuildCandidates(language, job.Reading);
+                    _request.WriteLine(Convert.ToBase64String(Encoding.UTF8.GetBytes(job.Reading)));
+                    _request.Flush();
+
+                    string line = _response.ReadLine();
+                    if (line == null)
+                    {
+                        throw new InvalidOperationException("the helper process exited");
+                    }
+
+                    // Base64 keeps the pipe ASCII-only, so the console code page
+                    // of the redirected streams cannot corrupt the text.
+                    string payload = Encoding.UTF8.GetString(Convert.FromBase64String(line));
+                    job.Result = payload.Length == 0
+                        ? new string[0]
+                        : payload.Split('\t');
                 }
                 catch (Exception ex)
                 {
                     job.Result = null;
-                    lock (Sync)
-                    {
-                        _unavailable = true;
-                    }
+                    _unavailable = true;
 
                     Plugin.Log?.Warn(
-                        "JapaneseIME: the Microsoft IME conversion engine is unavailable (" +
+                        "JapaneseIME: the Microsoft IME conversion helper is unavailable (" +
                         ex.GetType().Name + "). Pointer input stays kana only.");
+
+                    Shutdown();
                 }
                 finally
                 {
@@ -167,140 +190,37 @@ namespace JapaneseIME
             }
         }
 
-        private static string[] BuildCandidates(IFELanguage language, string reading)
+        private static void StartHost()
         {
-            List<string> candidates = new List<string>(3);
+            string path = Path.Combine(
+                Path.GetDirectoryName(typeof(KanjiConverter).Assembly.Location) ?? string.Empty,
+                HostFileName);
 
-            string contextual = ConvertWithContext(language, reading);
-            AddCandidate(candidates, contextual, reading);
-
-            string direct;
-            if (language.GetConversion(reading, 1, -1, out direct) >= 0)
+            if (!File.Exists(path))
             {
-                AddCandidate(candidates, direct, reading);
+                throw new FileNotFoundException("helper not found", path);
             }
 
-            return candidates.ToArray();
-        }
-
-        private static void AddCandidate(List<string> candidates, string value, string reading)
-        {
-            if (string.IsNullOrEmpty(value) || value == reading || candidates.Contains(value))
+            UTF8Encoding encoding = new UTF8Encoding(false);
+            ProcessStartInfo info = new ProcessStartInfo
             {
-                return;
+                FileName = path,
+                WorkingDirectory = Path.GetDirectoryName(path) ?? string.Empty,
+                UseShellExecute = false,
+                CreateNoWindow = true,
+                RedirectStandardInput = true,
+                RedirectStandardOutput = true,
+            };
+
+            _process = Process.Start(info);
+            if (_process == null)
+            {
+                throw new InvalidOperationException("the helper process did not start");
             }
 
-            candidates.Add(value);
-        }
-
-        private static string ConvertWithContext(IFELanguage language, string reading)
-        {
-            string input = Context + reading;
-            IntPtr info = Marshal.AllocHGlobal(input.Length * 4);
-            IntPtr pointer = IntPtr.Zero;
-
-            try
-            {
-                for (int i = 0; i < input.Length; i++)
-                {
-                    // FIXR: keep the context as written and use it only as a hint.
-                    Marshal.WriteInt32(info, i * 4, i < Context.Length ? (int)FelangClmnFixr : 0);
-                }
-
-                int hr = language.GetJMorphResult(
-                    FelangReqConv,
-                    FelangCmodeNoInvisibleChar,
-                    input.Length,
-                    input,
-                    info,
-                    out pointer);
-
-                if (hr < 0 || pointer == IntPtr.Zero)
-                {
-                    return null;
-                }
-
-                MORRSLT result = Marshal.PtrToStructure<MORRSLT>(pointer);
-                if (result.pwchOutput == IntPtr.Zero || result.cchOutput <= 0 || result.cchOutput > input.Length * 4)
-                {
-                    return null;
-                }
-
-                string output = Marshal.PtrToStringUni(result.pwchOutput, result.cchOutput);
-                if (output == null || !output.StartsWith(Context, StringComparison.Ordinal))
-                {
-                    return null;
-                }
-
-                return output.Substring(Context.Length);
-            }
-            catch
-            {
-                return null;
-            }
-            finally
-            {
-                Marshal.FreeHGlobal(info);
-
-                if (pointer != IntPtr.Zero)
-                {
-                    Marshal.FreeCoTaskMem(pointer);
-                }
-            }
-        }
-
-        [StructLayout(LayoutKind.Sequential, Pack = 1)]
-        private struct MORRSLT
-        {
-            public uint dwSize;
-            public IntPtr pwchOutput;
-            public ushort cchOutput;
-            public IntPtr pwchRead;
-            public ushort cchRead;
-            public IntPtr pchInputPos;
-            public IntPtr pchOutputIdxWDD;
-            public IntPtr pchReadIdxWDD;
-            public IntPtr paMonoRubyPos;
-            public IntPtr pWDD;
-            public int cWDD;
-            public IntPtr pPrivate;
-        }
-
-        [ComImport, Guid("019F7152-E6DB-11D0-83C3-00C04FDDB82E"),
-         InterfaceType(ComInterfaceType.InterfaceIsIUnknown)]
-        private interface IFELanguage
-        {
-            [PreserveSig]
-            int Open();
-
-            [PreserveSig]
-            int Close();
-
-            [PreserveSig]
-            int GetJMorphResult(
-                uint request,
-                uint conversionMode,
-                int length,
-                [MarshalAs(UnmanagedType.LPWStr)] string input,
-                IntPtr info,
-                out IntPtr result);
-
-            [PreserveSig]
-            int GetConversionModeCaps(out uint caps);
-
-            [PreserveSig]
-            int GetPhonetic(
-                [MarshalAs(UnmanagedType.BStr)] string text,
-                int start,
-                int length,
-                [MarshalAs(UnmanagedType.BStr)] out string result);
-
-            [PreserveSig]
-            int GetConversion(
-                [MarshalAs(UnmanagedType.BStr)] string text,
-                int start,
-                int length,
-                [MarshalAs(UnmanagedType.BStr)] out string result);
+            _request = _process.StandardInput;
+            _request.AutoFlush = true;
+            _response = _process.StandardOutput;
         }
     }
 }

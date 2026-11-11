@@ -82,6 +82,7 @@ namespace JapaneseIME
             try
             {
                 ImeMessageHook.Uninstall();
+                KanjiConverter.Shutdown();
                 ImeManager.Instance?.Shutdown();
                 Harmony?.UnpatchSelf();
                 ImeManager.DestroyInstance();
