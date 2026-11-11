@@ -8,6 +8,8 @@ Beat Saber のゲーム内キーボードで、Windows の日本語 IME を使�
 - 入力欄を開いている間だけ Windows IME を有効にし、閉じると自動で元に戻します。
 - ローマ字入力 → ひらがな → 漢字変換を、いつもの Windows IME（Microsoft IME / Google 日本語入力など）で行えます。
 - 変換中の文字列（未確定文字）をゲーム内の入力欄にそのまま表示します。
+- ゲーム内キーボード（ポインタ入力）のローマ字も、`Space` で漢字に変換できます（Microsoft IME の変換エンジンを使用）。
+- 変換候補の一覧をゲーム内の正面に表示します。選択中の候補は色付きで強調され、複数ページある場合はページ番号も表示されます。
 - `Space` で変換、`Enter` で確定、`Esc` で変換取消、`Backspace` で編集。
 - `Ctrl+V` でクリップボードの日本語を貼り付け（設定で無効化可能）。
 - 入力欄の文字数上限を尊重します。
@@ -18,6 +20,7 @@ Beat Saber のゲーム内キーボードで、Windows の日本語 IME を使�
 | --- | --- |
 | Beat Saber | **1.40.8** (PC / Steam・Oculus・BSManager) |
 | Mod loader | BSIPA 4.3.6 以上 |
+| UI | Beat Saber Markup Language (BSML) **1.12.5 以上** |
 | OS | Windows 10 / 11 |
 | 入力 | 物理キーボード + 日本語 IME |
 | 表示 | 日本語フォント。**SiraLocalizer** を入れると確実です |
@@ -30,7 +33,9 @@ Beat Saber のゲーム内キーボードで、Windows の日本語 IME を使�
 
 1. Beat Saber を終了します。
 2. `JapaneseIME.dll` を `Beat Saber\Plugins\` にコピーします。
-3. ゲームを起動します。BSIPA のログに次のように出ればロード成功です。
+3. **BSML** (`BSML.dll`) が `Plugins` にない場合は導入します。Mod Assistant / BSManager では
+   マニフェストの依存として自動導入されます。
+4. ゲームを起動します。BSIPA のログに次のように出ればロード成功です。
 
 ```text
 [Japanese IME] JapaneseIME started: Windows IME input is enabled for in-game text fields.
@@ -43,18 +48,36 @@ BSManager を使っている場合は、対象インスタンスの `Plugins` �
 1. 曲検索など、ゲーム内の文字入力欄を開きます。
 2. Windows IME を日本語入力モードにします（`半角/全角` キー、または `Alt` + `` ` ``）。
 3. ローマ字で入力します。変換中の文字は入力欄に表示されます。
-4. `Space` で候補を選択し、`Enter` で確定します。
+4. `Space` で変換します。候補一覧がゲーム内の正面に表示されるので、候補を選んで `Enter` で確定します。
 5. ゲーム内キーボードの OK / 検索ボタンで決定します。
 
 例: `nihongo` → `Space` → `Enter` で「日本語」。
 
-### ゲーム内キーボード（ポインタ入力）は対象外
+### ゲーム内キーボード（ポインタ入力）
 
-ゲーム内キーボードのキーをポインタで押した場合の**文字入力は対象外**です。
-ゲームの UI をクリックするたびに Windows は IME の変換中文字列を確定してしまうため、
-ローマ字を積み上げてかな・漢字に変換することができません（1 クリック = 1 文字で確定）。
+ゲーム内キーボードのキーをポインタで押した場合も、**ローマ字がかなに変換され、`Space` で漢字に変換できます**。
 
-FPFC（起動引数 `fpfc`）またはデスクトップミラーで、**物理キーボード**から入力してください。
+1. `nihongo` とタップ → 入力欄に `にほんご` が入ります。
+2. `Space` をタップ → 漢字（例: `日本語`）に変換され、候補一覧がゲーム内に表示されます。
+3. もう一度 `Space` をタップすると、漢字 → カタカナ → ひらがな の順に候補が切り替わります。
+4. `OK` / 検索ボタンで確定します。候補表示中に別のキーを押すと、その候補を確定して入力を続けます。
+
+ゲームはキー入力を入力欄へ直接書き込み、しかも UI をクリックするたびに Windows IME の変換中文字列を確定してしまうため、
+Windows IME の変換は使えません。そのため、かなを漢字に変換する候補は **オンライン API** と **内蔵辞書** から集めます。
+
+- 候補は次の順で集めます（重複は除去、最大 8 件）。
+  1. **オンライン API**（Google CGI API for Japanese Input）… 既読の読みはキャッシュ。結果が届くと候補一覧が自動で更新されます。
+  2. **内蔵の JMdict 由来辞書** … オフライン時や API が使えないときのフォールバック（例: `かみ` → `神` / `紙` / `髪`）
+- オンライン API は読み（かな）を `https://www.google.com/transliterate` へ HTTPS で送ります。送信を避けたい場合は
+  `UseOnlineDictionary` を `false` にしてください（内蔵辞書のみで動作します）。
+- 変換はすべて非同期です。候補はすぐに表示され、オンライン API の結果が届くと一覧が自動で更新されます。
+- どちらの経路も無い場合は、かな入力のみになります。
+- かなに変換するのは、IME が日本語モードのときだけです。`半角英数` モードでは従来どおり半角の英数が入ります。
+- `Backspace` は、変換中なら変換を取り消して読みに戻し、未確定のローマ字（例: `k`）があればそれを 1 文字消し、
+  なければ入力済みの文字を消します。
+- この動作は `ConvertOnScreenKeyboard` で無効にできます。
+
+FPFC（起動引数 `fpfc`）またはデスクトップミラーで、**物理キーボード**を使うと漢字変換まで行えます。
 
 ### 日本語入力モード切替キー
 
@@ -73,9 +96,10 @@ FPFC（起動引数 `fpfc`）またはデスクトップミラーで、**物理�
 
 ### VR での注意
 
-Windows の IME 候補ウィンドウはデスクトップ（モニター）に表示されます。VR ヘッドセット内には表示されません。
-VR で変換まで行う場合は、デスクトップミラーまたは FPFC（`fpfc` 起動引数）でモニターを見ながら操作してください。
-入力欄自体には変換中の文字が表示されるため、確定後の文字は VR 内でも確認できます。
+この MOD は Windows IME の候補一覧をゲームウィンドウの IME メッセージ（`WM_IME_NOTIFY`）から読み取り、
+ゲーム内の正面に表示します（`ShowCandidatesInGame`、既定で有効）。
+OS の候補ウィンドウはゲーム内表示と重複しないよう抑制します。
+選択中の候補とページ番号も VR 内で確認できます。
 
 ## 設定
 
@@ -93,6 +117,9 @@ VR で変換まで行う場合は、デスクトップミラーまたは FPFC（
   "ReapplyOnFocus": true,
   "ShowImeModeKey": true,
   "ShowCandidatesInGame": true,
+  "ConvertOnScreenKeyboard": true,
+  "SimulatePhysicalKeyboard": false,
+  "UseOnlineDictionary": true,
   "ExtraKeyWidthScale": 1.8
 }
 ```
@@ -108,7 +135,10 @@ VR で変換まで行う場合は、デスクトップミラーまたは FPFC（
 | `ReapplyOnFocus` | `true` | ゲームにフォーカスが戻ったとき日本語モードを再適用する |
 | `SelfTestMode` | `false` | 入力欄なしで IME イベントをログに出す診断モード。`F9` で入力欄の一覧と書き込みテストを実行 |
 | `ShowImeModeKey` | `true` | ゲーム内キーボードに IME モード切替キーを追加する |
-| `ShowCandidatesInGame` | `true` | 変換候補をゲーム内（正面の空中）に表示する |
+| `ShowCandidatesInGame` | `true` | 変換候補の一覧をゲーム内の正面に表示する（選択中の候補を強調） |
+| `ConvertOnScreenKeyboard` | `true` | ゲーム内キーボードのローマ字をかなに変換し、`Space` で漢字に変換する |
+| `SimulatePhysicalKeyboard` | `false` | ゲーム内キーボードのキーを物理キーの信号として送る（試験用。UI クリックのたびに IME が確定するため通常は無効） |
+| `UseOnlineDictionary` | `true` | 変換候補をオンライン API（Google CGI API for Japanese Input）から取得する。失敗時は内蔵の JMdict 辞書を使う |
 | `ExtraKeyWidthScale` | `1.8` | 追加キーの幅（通常キーに対する倍率。1.0〜3.0） |
 
 ### 「a」が半角の「a」になる場合
@@ -132,16 +162,29 @@ VR で変換まで行う場合は、デスクトップミラーまたは FPFC（
 - 入力欄を開いた直後に Windows IME を日本語（`IME_CMODE_NATIVE | IME_CMODE_FULLSHAPE | IME_CMODE_ROMAN`）へ切り替えます。Unity は IME の「入力受付」を有効にするだけで、かな入力モードまでは選ばないため、この処理がないと `a` が半角の `a` のままになります。
 - Unity Input System の `Keyboard.onIMECompositionChange` で変換中文字列を取得し、`Keyboard.onTextInput` で確定文字を取得します。
 - 変換中はゲームの入力欄表示に未確定文字を反映し、確定時にゲーム標準の `onValueChanged` を呼ぶことで、検索などのゲーム側処理に確定文字を渡します。
+- 変換候補の一覧は、ゲームウィンドウの `WM_IME_NOTIFY`（候補の開閉・変更）で `ImmGetCandidateList` から取得し、BSML の `FloatingScreen` 上に表示します。
+- 取得した候補はページ単位で表示し、選択中の候補を強調します。OS の候補ウィンドウは HMD から見えないため、
+  `WM_IME_SETCONTEXT` の lParam を 0 にして描画させません。
 - Input System が利用できない場合は、従来の `Input.compositionString` / `Input.inputString` にフォールバックします。
 - 旧 `VRTextEntryController` + `UIKeyboard` を使う画面にも対応しています。
-- ゲーム内キーボードのキー入力は横取りしません（ポインタ入力は対象外）。追加したモード切替キーだけが
-  ゲームの UI から `Button.onClick` を受け取り、IME のモードを切り替えます。
+- ゲーム内キーボードのキー入力は、IME が日本語モードのときだけ横取りし、物理キーの信号として送り直します
+  （`SimulatePhysicalKeyboard`）。IME が反応しない場合はローマ字 → かな変換で入力欄へ書き込みます。
+  追加したモード切替キーはゲームの UI から `Button.onClick` を受け取り、IME のモードを切り替えます。
 
 ## ビルド
 
 ```powershell
 dotnet build .\Japanese_IME.csproj -c Release
 ```
+
+GitHub Actions（`.github/workflows/build.yml`）でもビルドできます。CI では
+[`nicoco007/setup-beat-saber`](https://github.com/nicoco007/setup-beat-saber) が `Directory.Build.props` の
+`GameVersion` と `DependsOn`（BSIPA 4.3.6 / BeatSaberMarkupLanguage 1.12.5）を読み、Beat Saber の参照アセンブリと
+依存 MOD を BeatMods から取得します（`BeatSaberDir` が自動設定されます）。
+そのあと `dotnet build -c Release -p:ContinuousIntegrationBuild=True` を実行し、
+`bin/Release/Artifact` を `JapaneseIME.zip` にまとめて成果物としてアップロードします。
+
+
 
 BSMT を使う場合:
 
@@ -157,7 +200,7 @@ bsmt build .\Japanese_IME.csproj -c Release --package
 | --- | --- |
 | 日本語が入力できない | ゲームウィンドウにフォーカスがあるか。Windows IME が日本語モードか。 |
 | 日本語が □ になる | SiraLocalizer を入れる。 |
-| 変換候補が見えない | VR 内には出ません。デスクトップミラー / FPFC でモニターを確認。 |
+| 変換候補が見えない | `ShowCandidatesInGame` が `true` か。`Space` で変換して候補一覧が出ているか。`VerboseLogging` を `true` にすると `IMe candidates:` のログが出る。 |
 | 入力欄を開いても IME がオンにならない | `UserData\Japanese IME.json` の `Enabled` が `true` か。BSIPA ログに `activated for ...` が出るか。 |
 | 特定の入力欄だけで動かない | その画面が `InputFieldView` を使っているか。パスワード欄は既定で対象外。 |
 
@@ -165,12 +208,22 @@ bsmt build .\Japanese_IME.csproj -c Release --package
 
 ## 既知の制限
 
-- Windows IME の候補ウィンドウは VR 空間には描画されません（OS の制約）。`ShowCandidatesInGame` で
-  ゲーム内に一覧を表示します。
-- ゲーム内キーボードのポインタによる文字入力は対象外です。ゲーム側の UI クリックで IME の変換中文字列が
-  確定してしまうため、FPFC / デスクトップミラー + 物理キーボードで操作してください。
+- Windows IME の候補一覧は、OS の候補ウィンドウではなくゲームウィンドウの IME メッセージから取得します。
+  OS 側の候補ウィンドウは表示されません（`ShowCandidatesInGame` を `false` にすると元に戻ります）。
+- ゲーム内キーボードのポインタ入力は、内蔵のローマ字 → かな変換と、オンライン API／内蔵辞書による
+  かな → 漢字変換で行います。MS-IME の候補一覧は公開 API から取得できないため、候補はオンライン API と
+  内蔵辞書（JMdict）の語彙に依存します。オンライン API を無効にすると、辞書に載っている語だけが変換できます。
 - Beat Saber のバージョンが変わると `InputFieldView` の API が変わる可能性があります。対象は 1.40.8 です。
 
 ## アンインストール
 
-`Plugins\JapaneseIME.dll` を削除し、必要なら `UserData\Japanese IME.json` も削除してください。
+`Plugins\JapaneseIME.dll` を削除し、
+必要なら `UserData\Japanese IME.json` も削除してください。
+
+## ライセンス
+
+このプラグイン本体はリポジトリのライセンスに従います。同梱するかな漢字辞書データは JMdict（EDRDG）由来で
+**CC BY-SA 4.0** です。詳細は [THIRD-PARTY-NOTICES.md](THIRD-PARTY-NOTICES.md) を参照してください。
+
+
+

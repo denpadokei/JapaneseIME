@@ -1,9 +1,11 @@
 using System;
+using System.Collections.Generic;
 using System.Text;
 using HMUI;
 using UnityEngine;
 using UnityEngine.InputSystem;
 using UnityEngine.InputSystem.LowLevel;
+using Screen = UnityEngine.Screen;
 
 namespace JapaneseIME
 {
@@ -30,6 +32,15 @@ namespace JapaneseIME
         private Keyboard _keyboard;
         private string _baseText = string.Empty;
         private string _composition = string.Empty;
+        private string _keyboardRomaji = string.Empty;
+        private string _keyboardReading = string.Empty;
+        private string[] _conversionCandidates;
+        private int _conversionIndex;
+        private char _probeChar;
+        private string _probeComposition = string.Empty;
+        private int _probeTextFrame = -1;
+        private float _probeDeadline;
+        private bool _simulationUnavailable;
         private string _lastPreview;
         private bool _sawInputSystemComposition;
         private bool _sawInputSystemText;
@@ -137,6 +148,11 @@ namespace JapaneseIME
             _target = target;
             _baseText = target.ReadText() ?? string.Empty;
             _composition = string.Empty;
+            _keyboardRomaji = string.Empty;
+            _keyboardReading = string.Empty;
+            _conversionCandidates = null;
+            _conversionIndex = 0;
+            _probeChar = '\0';
             _lastPreview = null;
             _lastTextInputFrame = -1;
             _lastCompositionFrame = -1;
@@ -152,6 +168,7 @@ namespace JapaneseIME
             _nextModeRetryTime = 0f;
 
             AttachKeyboard();
+            ImeMessageHook.EnsureInstalled();
             EnableIme();
             ApplyJapaneseInputMode();
             RefreshDisplay(notify: false, force: true);
@@ -159,6 +176,484 @@ namespace JapaneseIME
 
             Plugin.Log?.Info(
                 $"JapaneseIME activated for '{target.FieldName}' (maxLength={target.MaxLength}).");
+        }
+
+        /// <summary>
+        /// Handles a character typed on the game's on-screen (VR pointer) keyboard.
+        /// Those keys write straight into the field, so the Windows IME never sees
+        /// them; while the IME is in a Japanese mode the romaji is converted here.
+        /// Returns true when the game must not also insert the raw character.
+        /// </summary>
+        internal bool TryHandleGameKeyboardChar(InputFieldView field, char letter)
+        {
+            if (!Plugin.Config.ConvertOnScreenKeyboard || letter == '\0')
+            {
+                return false;
+            }
+
+            if (_target == null || field == null || _target.Owner != field || !_target.IsAlive)
+            {
+                return false;
+            }
+
+            try
+            {
+                if (!IsJapaneseInputMode())
+                {
+                    CommitPointerInput(notify: false);
+                    return false;
+                }
+
+                VerifySyntheticKeyboard();
+                DetectCommittedComposition();
+
+                int maxLength = _target.MaxLength;
+                if (maxLength > 0 &&
+                    _baseText.Length + _composition.Length + PointerText.Length +
+                    _keyboardRomaji.Length >= maxLength)
+                {
+                    // Same as the game's own keyboard: a full field swallows the key.
+                    return true;
+                }
+
+                if (Plugin.Config.SimulatePhysicalKeyboard && !_simulationUnavailable)
+                {
+                    return HandleWithSyntheticKey(letter, maxLength);
+                }
+
+                return HandleWithRomajiConversion(letter, maxLength);
+            }
+            catch (Exception ex)
+            {
+                LogError(ex);
+                return false;
+            }
+        }
+
+        /// <summary>
+        /// Handles pointer-keyboard typing without the Windows IME: romaji becomes kana,
+        /// and Space converts the accumulated reading to kanji with the Microsoft IME
+        /// conversion engine. Further Space taps cycle kanji / katakana / hiragana.
+        /// </summary>
+        private bool HandleWithRomajiConversion(char letter, int maxLength)
+        {
+            if (_target == null)
+            {
+                return false;
+            }
+
+            if (letter == ' ' && Plugin.Config.ConvertOnScreenKeyboard && HasPointerInput)
+            {
+                return StartOrCycleConversion(maxLength);
+            }
+
+            // Typing the next character confirms the shown candidate.
+            CommitConversion();
+
+            if (RomajiKana.IsRomajiChar(letter))
+            {
+                _keyboardRomaji += char.ToLowerInvariant(letter);
+
+                string produced;
+                string remaining;
+                RomajiKana.Convert(_keyboardRomaji, IsKatakanaMode(), false, out produced, out remaining);
+
+                _keyboardRomaji = remaining;
+                if (produced.Length > 0)
+                {
+                    _keyboardReading = AppendClamped(_keyboardReading, produced, maxLength);
+                }
+            }
+            else
+            {
+                // Space, digits and other symbols end the pending syllable.
+                FlushKeyboardRomaji(_target);
+                CommitPointerInput(notify: false);
+                _baseText = AppendClamped(_baseText, letter.ToString(), maxLength);
+            }
+
+            RefreshDisplay(notify: true, force: true);
+            return true;
+        }
+
+        /// <summary>Text the pointer keyboard is composing, shown before the caret.</summary>
+        private string PointerText =>
+            _conversionCandidates != null
+                ? _conversionCandidates[_conversionIndex]
+                : _keyboardReading;
+
+        private bool HasPointerInput =>
+            _conversionCandidates != null || _keyboardReading.Length > 0 || _keyboardRomaji.Length > 0;
+
+        /// <summary>
+        /// First Space converts the reading; later presses cycle the candidates.
+        /// </summary>
+        private bool StartOrCycleConversion(int maxLength)
+        {
+            if (_conversionCandidates == null)
+            {
+                FlushKeyboardRomaji(_target);
+                if (_keyboardReading.Length == 0)
+                {
+                    return false;
+                }
+
+                _conversionCandidates = BuildConversionCandidates(_keyboardReading);
+                _conversionIndex = 0;
+            }
+            else if (_conversionCandidates.Length > 1)
+            {
+                _conversionIndex = (_conversionIndex + 1) % _conversionCandidates.Length;
+            }
+
+            ShowPointerCandidates();
+            RefreshDisplay(notify: true, force: true);
+            return true;
+        }
+
+        private static string[] BuildConversionCandidates(string reading)
+        {
+            List<string> candidates = new List<string>(10);
+
+            // 1) Google's CGI API first. A cache miss starts a background request and
+            //    the list is refreshed as soon as the answer arrives.
+            if (Plugin.Config.UseOnlineDictionary)
+            {
+                string[] online;
+                if (OnlineDictionary.TryGet(reading, out online) && online != null)
+                {
+                    int limit = online.Length < 4 ? online.Length : 4;
+                    for (int i = 0; i < limit && candidates.Count < 6; i++)
+                    {
+                        AddCandidate(candidates, online[i], reading);
+                    }
+                }
+                else
+                {
+                    OnlineDictionary.Request(reading);
+                }
+            }
+
+            // 2) The built-in JMdict table fills in the homophones the API does not
+            //    return and covers offline sessions (かみ → 神 / 紙 / 髪).
+            string[] known;
+            if (KanjiDictionary.TryLookup(reading, out known) && known != null)
+            {
+                int limit = known.Length < 6 ? known.Length : 6;
+                for (int i = 0; i < limit && candidates.Count < 6; i++)
+                {
+                    AddCandidate(candidates, known[i], reading);
+                }
+            }
+
+            AddCandidate(candidates, RomajiKana.ToKatakana(reading), string.Empty);
+            AddCandidate(candidates, RomajiKana.ToHiragana(reading), string.Empty);
+
+            if (candidates.Count == 0)
+            {
+                candidates.Add(reading);
+            }
+
+            return candidates.ToArray();
+        }
+
+        private static void AddCandidate(List<string> candidates, string value, string reading)
+        {
+            if (string.IsNullOrEmpty(value) || value == reading || candidates.Contains(value))
+            {
+                return;
+            }
+
+            candidates.Add(value);
+        }
+
+        /// <summary>
+        /// The online dictionary or the IME engine answered while a reading is still
+        /// being converted: rebuild the list so its candidates can be picked without
+        /// another key press.
+        /// </summary>
+        private void RefreshConversionWithOnline(string reading)
+        {
+            if (string.IsNullOrEmpty(reading) || _conversionCandidates == null ||
+                string.IsNullOrEmpty(_keyboardReading) ||
+                !string.Equals(reading, _keyboardReading, StringComparison.Ordinal))
+            {
+                return;
+            }
+
+            string[] refreshed = BuildConversionCandidates(_keyboardReading);
+            if (refreshed == null || refreshed.Length == 0)
+            {
+                return;
+            }
+
+            _conversionCandidates = refreshed;
+            if (_conversionIndex >= _conversionCandidates.Length)
+            {
+                _conversionIndex = 0;
+            }
+
+            ShowPointerCandidates();
+            RefreshDisplay(notify: true, force: true);
+        }
+
+        private void ShowPointerCandidates()        {
+            if (!Plugin.Config.ShowCandidatesInGame || _conversionCandidates == null)
+            {
+                return;
+            }
+
+            ImeCandidateList list = new ImeCandidateList
+            {
+                Candidates = _conversionCandidates,
+                Selection = _conversionIndex,
+                PageStart = 0,
+                PageSize = _conversionCandidates.Length,
+            };
+
+            CandidateWindow.Show(list);
+        }
+
+        /// <summary>Confirms the candidate the player is looking at.</summary>
+        private void CommitConversion()
+        {
+            if (_conversionCandidates == null)
+            {
+                return;
+            }
+
+            string selected = _conversionCandidates[_conversionIndex];
+            if (_target != null && _target.IsAlive)
+            {
+                _baseText = AppendClamped(_baseText, selected, _target.MaxLength);
+            }
+
+            // The reading was replaced by the candidate, so it must not be shown again.
+            _keyboardReading = string.Empty;
+            ClearConversion();
+        }
+
+        private void ClearConversion()
+        {
+            if (_conversionCandidates == null)
+            {
+                return;
+            }
+
+            _conversionCandidates = null;
+            _conversionIndex = 0;
+            CandidateWindow.Hide();
+        }
+
+        /// <summary>
+        /// Folds everything the pointer keyboard is composing into the committed text.
+        /// </summary>
+        private void CommitPointerInput(bool notify)
+        {
+            FlushKeyboardRomaji(_target);
+
+            if (_conversionCandidates != null)
+            {
+                CommitConversion();
+            }
+            else if (_keyboardReading.Length > 0)
+            {
+                if (_target != null && _target.IsAlive)
+                {
+                    _baseText = AppendClamped(_baseText, _keyboardReading, _target.MaxLength);
+                }
+
+                _keyboardReading = string.Empty;
+            }
+
+            if (notify)
+            {
+                RefreshDisplay(notify: true, force: true);
+            }
+        }
+
+        /// <summary>
+        /// Sends the key a tap stands for so the Windows IME runs its normal romaji to
+        /// kana/kanji flow. The key is verified on the next frames: if the IME does not
+        /// react, the plugin stops simulating and uses its own converter instead.
+        /// </summary>
+        private bool HandleWithSyntheticKey(char letter, int maxLength)
+        {
+            CommitPointerInput(notify: false);
+
+            if (SyntheticKeyboard.TrySend(letter))
+            {
+                _probeChar = letter;
+                _probeComposition = _composition;
+                _probeTextFrame = _lastTextInputFrame;
+                _probeDeadline = Time.unscaledTime + 0.5f;
+                return true;
+            }
+
+            // Characters without a virtual key (and non-foreground windows) are
+            // inserted directly so a tap never disappears.
+            _baseText = AppendClamped(_baseText, letter.ToString(), maxLength);
+            RefreshDisplay(notify: true, force: true);
+            return true;
+        }
+
+        /// <summary>
+        /// Confirms the synthetic key reached the IME. A tap that produces neither a
+        /// composition nor a committed character means the simulation cannot work in
+        /// this game, so the built-in converter takes over.
+        /// </summary>
+        private void VerifySyntheticKeyboard()
+        {
+            if (_probeChar == '\0')
+            {
+                return;
+            }
+
+            if (_composition != _probeComposition || _lastTextInputFrame != _probeTextFrame)
+            {
+                _probeChar = '\0';
+                return;
+            }
+
+            if (Time.unscaledTime < _probeDeadline)
+            {
+                return;
+            }
+
+            char missed = _probeChar;
+            _probeChar = '\0';
+            _simulationUnavailable = true;
+            Plugin.Log?.Warn(
+                "JapaneseIME: the synthetic key produced no IME input. " +
+                "The on-screen keyboard now uses built-in romaji conversion.");
+
+            // Do not lose the tap that proved the simulation cannot work.
+            if (_target != null && _target.IsAlive)
+            {
+                HandleWithRomajiConversion(missed, _target.MaxLength);
+            }
+        }
+
+        /// <summary>
+        /// If a tap committed the live composition instead of extending it, the IME can
+        /// never build a multi-character reading from pointer input. Falls back to the
+        /// built-in converter for the rest of the session.
+        /// </summary>
+        private void DetectCommittedComposition()
+        {
+            if (_probeChar == '\0' || !IsRomajiLetter(_probeChar))
+            {
+                return;
+            }
+
+            if (_composition.Length > 0 || _lastTextInputFrame == _probeTextFrame)
+            {
+                return;
+            }
+
+            _probeChar = '\0';
+            _simulationUnavailable = true;
+            Plugin.Log?.Warn(
+                "JapaneseIME: the IME composition is committed between taps. " +
+                "The on-screen keyboard now uses built-in romaji conversion.");
+        }
+
+        private static bool IsRomajiLetter(char character)
+        {
+            return (character >= 'a' && character <= 'z') ||
+                   (character >= 'A' && character <= 'Z');
+        }
+
+        /// <summary>
+        /// Removes one pending romaji character. Returns false when there is nothing
+        /// pending so the game can delete from the field as usual.
+        /// </summary>
+        internal bool TryHandleGameKeyboardBackspace(InputFieldView field)
+        {
+            if (_target == null || field == null || _target.Owner != field)
+            {
+                return false;
+            }
+
+            if (_conversionCandidates != null)
+            {
+                // Backspace cancels the conversion and returns to the reading.
+                ClearConversion();
+                RefreshDisplay(notify: true, force: true);
+                return true;
+            }
+
+            if (_keyboardRomaji.Length > 0)
+            {
+                try
+                {
+                    _keyboardRomaji = _keyboardRomaji.Substring(0, _keyboardRomaji.Length - 1);
+                    RefreshDisplay(notify: true, force: true);
+                    return true;
+                }
+                catch (Exception ex)
+                {
+                    LogError(ex);
+                    return false;
+                }
+            }
+
+            if (_keyboardReading.Length > 0)
+            {
+                _keyboardReading = RemoveLastTextElement(_keyboardReading);
+                RefreshDisplay(notify: true, force: true);
+                return true;
+            }
+
+            if (Plugin.Config.SimulatePhysicalKeyboard &&
+                !_simulationUnavailable &&
+                SyntheticKeyboard.TrySendBackspace())
+            {
+                return true;
+            }
+
+            return false;
+        }
+
+        private bool IsJapaneseInputMode()
+        {
+            bool open;
+            int conversion;
+            return ImeSwitcher.TryGetConversionFor(ImeSwitcher.OwnWindow(), out open, out conversion) &&
+                   open &&
+                   (conversion & ImeSwitcher.ImeCmodeNative) != 0;
+        }
+
+        private bool IsKatakanaMode()
+        {
+            bool open;
+            int conversion;
+            return ImeSwitcher.TryGetConversionFor(ImeSwitcher.OwnWindow(), out open, out conversion) &&
+                   (conversion & ImeSwitcher.ImeCmodeKatakana) != 0;
+        }
+
+        /// <summary>
+        /// Converts any pending romaji into the reading buffer.
+        /// </summary>
+        private void FlushKeyboardRomaji(IImeTarget target)
+        {
+            if (_keyboardRomaji.Length == 0)
+            {
+                return;
+            }
+
+            string pending = _keyboardRomaji;
+            _keyboardRomaji = string.Empty;
+
+            string produced;
+            string remaining;
+            RomajiKana.Convert(pending, IsKatakanaMode(), true, out produced, out remaining);
+
+            if (produced.Length > 0)
+            {
+                int maxLength = target != null ? target.MaxLength : 0;
+                _keyboardReading = AppendClamped(_keyboardReading, produced, maxLength);
+            }
         }
 
         internal void Deactivate(IImeTarget target)
@@ -186,6 +681,7 @@ namespace JapaneseIME
             {
                 HandlePhysicalInput();
                 ApplyPendingEdits();
+                CommitPointerInput(notify: false);
 
                 if (_composition.Length > 0)
                 {
@@ -210,6 +706,9 @@ namespace JapaneseIME
 
             if (target == null)
             {
+                _keyboardRomaji = string.Empty;
+                _keyboardReading = string.Empty;
+                _conversionCandidates = null;
                 DetachKeyboard();
                 DisableIme();
                 return;
@@ -221,6 +720,8 @@ namespace JapaneseIME
                 // target is cleared before the final notification so a game callback
                 // cannot re-enter this manager.
                 ApplyPendingEditsToBase(target);
+                bool hadPointerInput = HasPointerInput;
+                CommitPointerInput(notify: false);
 
                 bool hadComposition = _composition.Length > 0;
                 if (commitComposition && hadComposition)
@@ -237,7 +738,7 @@ namespace JapaneseIME
 
                 if (target.IsAlive)
                 {
-                    if (hadComposition && commitComposition)
+                    if (commitComposition && (hadComposition || hadPointerInput))
                     {
                         target.Commit(_baseText);
                     }
@@ -268,10 +769,9 @@ namespace JapaneseIME
                 UpdateSelfTestHotkeys();
             }
 
-            PollCandidates();
-
             if (_target == null)
             {
+                CandidateWindow.Hide();
                 return;
             }
 
@@ -281,6 +781,25 @@ namespace JapaneseIME
                 {
                     DeactivateInternal(commitComposition: true);
                     return;
+                }
+
+                PollCandidates();
+                VerifySyntheticKeyboard();
+
+                ImeCandidateList pendingCandidates;
+                if (ImeMessageHook.TryTakePending(out pendingCandidates))
+                {
+                    CandidateWindow.Show(pendingCandidates);
+                }
+                else if (ImeMessageHook.TryTakePendingHide())
+                {
+                    CandidateWindow.Hide();
+                }
+
+                OnlineDictionary.Result onlineResult;
+                if (OnlineDictionary.TryTakeCompleted(out onlineResult))
+                {
+                    RefreshConversionWithOnline(onlineResult.Reading);
                 }
 
                 // While the on-screen keyboard drove the IME host, the plugin owned
@@ -294,6 +813,7 @@ namespace JapaneseIME
                 HandlePhysicalInput();
                 ApplyPendingEdits();
                 ReassertPreview();
+                CandidateWindow.FollowCamera();
 
                 // Moving the IME composition window while a composition is live
                 // makes the OS IME commit it, which turns every key press into an
@@ -318,6 +838,7 @@ namespace JapaneseIME
         }
 
         private float _nextCandidatePollTime;
+        private bool _candidateListVisible;
 
         /// <summary>
         /// Mirrors the Windows IME candidate list into world space. The OS candidate
@@ -327,6 +848,17 @@ namespace JapaneseIME
         {
             if (!Plugin.Config.ShowCandidatesInGame)
             {
+                ImeMessageHook.Uninstall();
+                CandidateWindow.Hide();
+                return;
+            }
+
+            ImeMessageHook.EnsureInstalled();
+            if (ImeMessageHook.Installed)
+            {
+                // The window hook receives WM_IME_NOTIFY and updates the overlay
+                // exactly when the IME exposes its candidate list. Polling from
+                // Update does not return candidates on current Windows IMEs.
                 return;
             }
 
@@ -335,20 +867,37 @@ namespace JapaneseIME
                 return;
             }
 
-            _nextCandidatePollTime = Time.unscaledTime + 0.1f;
+            _nextCandidatePollTime = Time.unscaledTime + 0.05f;
 
             IntPtr hwnd = ImeSwitcher.OwnWindow();
 
-            string[] candidates;
-            int selection;
-            if (ImeCandidates.TryRead(hwnd, out candidates, out selection))
+            ImeCandidateList candidates;
+            bool found = ImeCandidates.TryRead(hwnd, out candidates);
+            if (found)
             {
-                CandidateWindow.Show(candidates, selection);
+                CandidateWindow.Show(candidates);
             }
             else
             {
                 CandidateWindow.Hide();
             }
+
+            if (Plugin.Config.VerboseLogging && found != _candidateListVisible)
+            {
+                if (found)
+                {
+                    Plugin.Log?.Debug(
+                        $"JapaneseIME candidates: {candidates.Candidates.Length} entries, " +
+                        $"page start {candidates.PageStart}, page size {candidates.PageSize}, " +
+                        $"selected {candidates.Selection}.");
+                }
+                else
+                {
+                    Plugin.Log?.Debug("JapaneseIME candidates: list closed.");
+                }
+            }
+
+            _candidateListVisible = found;
         }
 
         private void RefreshKeyboardAttachment()        {
@@ -636,6 +1185,11 @@ namespace JapaneseIME
 
             try
             {
+                if (_conversionCandidates != null || _keyboardReading.Length > 0)
+                {
+                    CommitPointerInput(notify: false);
+                }
+
                 _sawInputSystemText = true;
                 _lastTextInputFrame = Time.frameCount;
 
@@ -685,6 +1239,9 @@ namespace JapaneseIME
 
             try
             {
+                // A physical IME composition takes over from pointer typing.
+                CommitPointerInput(notify: false);
+
                 _sawInputSystemComposition = true;
                 _lastCompositionFrame = Time.frameCount;
                 SetComposition(compositionString.ToString());
@@ -960,7 +1517,7 @@ namespace JapaneseIME
                 return;
             }
 
-            string preview = _baseText + _composition;
+            string preview = _baseText + _composition + PointerText + _keyboardRomaji;
             string actual;
             try
             {
@@ -991,13 +1548,16 @@ namespace JapaneseIME
             }
             else
             {
-                // The game changed the field (on-screen key, clear button, SetText).
+                // The game changed the field (clear button, SetText).
                 if (Plugin.Config.VerboseLogging && actual != _baseText)
                 {
                     Plugin.Log?.Debug($"JapaneseIME field changed by game: '{_baseText}' -> '{actual}'");
                 }
 
                 _baseText = actual;
+                _keyboardRomaji = string.Empty;
+                _keyboardReading = string.Empty;
+                ClearConversion();
                 _lastPreview = actual;
             }
         }
@@ -1009,7 +1569,7 @@ namespace JapaneseIME
                 return;
             }
 
-            string preview = _baseText + _composition;
+            string preview = _baseText + _composition + PointerText + _keyboardRomaji;
             if (!force && preview == _lastPreview)
             {
                 if (notify)

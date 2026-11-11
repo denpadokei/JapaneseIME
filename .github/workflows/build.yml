@@ -1,0 +1,73 @@
+name: Build
+
+on:
+  push:
+    branches: [master, main]
+    paths:
+      - "**/*.cs"
+      - "**/*.csproj"
+      - "Directory.Build.props"
+      - "manifest.json"
+      - "Resources/**"
+      - ".github/workflows/build.yml"
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      # Reads GameVersion and the DependsOn items from the project, then downloads
+      # the 1.40.8 reference assemblies and BSIPA/BSML from BeatMods.
+      # It exports BeatSaberDir/GameDirectory for the build.
+      - name: Set up Beat Saber references
+        uses: nicoco007/setup-beat-saber@v1.2.3
+        with:
+          project-path: ${{ github.workspace }}\Japanese_IME.csproj
+
+      - name: Verify Beat Saber references
+        shell: pwsh
+        run: |
+          if (-not $env:BeatSaberDir) { throw "BeatSaberDir is not set" }
+          if (-not (Test-Path (Join-Path $env:BeatSaberDir "Libs"))) {
+            throw "Dependency references are missing. Check the setup-beat-saber log."
+          }
+          if (-not (Test-Path (Join-Path $env:BeatSaberDir "Plugins\BSML.dll"))) {
+            throw "BSML.dll is missing. Check that manifest.json depends on BeatSaberMarkupLanguage."
+          }
+
+      # Native/build.ps1 compiles the converter DLL with MSVC (present on the runner).
+      - name: Build Release
+        run: dotnet build "${{ github.workspace }}\Japanese_IME.csproj" -c Release -p:ContinuousIntegrationBuild=True
+
+      # BSMT writes the deployment layout to bin\Release\Artifact (the project
+      # does not append the target framework to the output path).
+      - name: Package release zip
+        shell: pwsh
+        run: |
+          $artifact = "bin\Release\Artifact"
+          if (-not (Test-Path $artifact)) { throw "CI output not found: $artifact" }
+
+          $required = @(
+            'Plugins/JapaneseIME.dll'
+          )
+
+          $missing = $required | Where-Object { -not (Test-Path (Join-Path $artifact $_)) }
+          if ($missing) { throw "Build output is missing: $($missing -join ', ')" }
+
+          New-Item -ItemType Directory -Force -Path "bin\Release\artifacts" | Out-Null
+          Compress-Archive -Path "$artifact\*" -DestinationPath "bin\Release\artifacts\JapaneseIME.zip" -Force
+          Get-ChildItem $artifact -Recurse -File | Select-Object FullName, Length
+
+      - name: Upload build artifact
+        uses: actions/upload-artifact@v7
+        with:
+          name: JapaneseIME-${{ github.sha }}
+          path: ${{ github.workspace }}\bin\Release\artifacts\JapaneseIME.zip
+          if-no-files-found: error
+          retention-days: 14
