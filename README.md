@@ -77,11 +77,11 @@ FPFC（起動引数 `fpfc`）またはデスクトップミラーで、**物理�
 
 ### VR での注意
 
-Windows の IME 候補ウィンドウ自体はデスクトップ（モニター）に表示され、VR ヘッドセット内には出ません。
-この MOD は Windows IME から同じ候補一覧を読み取り、ゲーム内の正面に表示します
-（`ShowCandidatesInGame`、既定で有効）。選択中の候補とページ番号も VR 内で確認できます。
-ページ移動は IME のページ送りキー（Microsoft IME では `PageDown` / `PageUp` など）で行えます。
-入力欄自体にも変換中の文字が表示されるため、確定後の文字は VR 内でも確認できます。
+この MOD は Windows IME の候補一覧をゲームウィンドウの IME メッセージ（`WM_IME_NOTIFY`）から読み取り、
+ゲーム内の正面に表示します（`ShowCandidatesInGame`、既定で有効）。
+OS の候補ウィンドウはゲーム内表示と重複しないよう抑制します。`ShowCandidatesInGame` を `false` にすると
+抑制も解除され、従来どおりデスクトップ側に候補ウィンドウが出ます。
+選択中の候補とページ番号も VR 内で確認できます。
 
 ## 設定
 
@@ -138,7 +138,8 @@ Windows の IME 候補ウィンドウ自体はデスクトップ（モニター�
 - 入力欄を開いた直後に Windows IME を日本語（`IME_CMODE_NATIVE | IME_CMODE_FULLSHAPE | IME_CMODE_ROMAN`）へ切り替えます。Unity は IME の「入力受付」を有効にするだけで、かな入力モードまでは選ばないため、この処理がないと `a` が半角の `a` のままになります。
 - Unity Input System の `Keyboard.onIMECompositionChange` で変換中文字列を取得し、`Keyboard.onTextInput` で確定文字を取得します。
 - 変換中はゲームの入力欄表示に未確定文字を反映し、確定時にゲーム標準の `onValueChanged` を呼ぶことで、検索などのゲーム側処理に確定文字を渡します。
-- 変換候補の一覧は BSML の `FloatingScreen` 上に構築し、候補ページの変化に合わせてテキストとパネルサイズを更新します。
+- 変換候補の一覧は、ゲームウィンドウの `WM_IME_NOTIFY`（候補の開閉・変更）で `ImmGetCandidateList` から取得し、BSML の `FloatingScreen` 上に表示します。
+- 取得した候補はページ単位で表示し、選択中の候補を強調します。OS の候補ウィンドウはゲーム内表示と重複しないよう抑制します。
 - Input System が利用できない場合は、従来の `Input.compositionString` / `Input.inputString` にフォールバックします。
 - 旧 `VRTextEntryController` + `UIKeyboard` を使う画面にも対応しています。
 - ゲーム内キーボードのキー入力は横取りしません（ポインタ入力は対象外）。追加したモード切替キーだけが
@@ -164,7 +165,7 @@ bsmt build .\Japanese_IME.csproj -c Release --package
 | --- | --- |
 | 日本語が入力できない | ゲームウィンドウにフォーカスがあるか。Windows IME が日本語モードか。 |
 | 日本語が □ になる | SiraLocalizer を入れる。 |
-| 変換候補が見えない | `ShowCandidatesInGame` が `true` か。`Space` で変換して候補一覧が出ているか。`VerboseLogging` を `true` にすると候補数のログが出る。 |
+| 変換候補が見えない | `ShowCandidatesInGame` が `true` か。`Space` で変換して候補一覧が出ているか。`VerboseLogging` を `true` にすると `IMe candidates:` のログが出る。 |
 | 入力欄を開いても IME がオンにならない | `UserData\Japanese IME.json` の `Enabled` が `true` か。BSIPA ログに `activated for ...` が出るか。 |
 | 特定の入力欄だけで動かない | その画面が `InputFieldView` を使っているか。パスワード欄は既定で対象外。 |
 
@@ -172,8 +173,8 @@ bsmt build .\Japanese_IME.csproj -c Release --package
 
 ## 既知の制限
 
-- Windows IME の候補ウィンドウ自体は VR 空間には描画されません（OS の制約）。同じ内容を
-  `ShowCandidatesInGame` でゲーム内に表示します。
+- Windows IME の候補一覧は、OS の候補ウィンドウではなくゲームウィンドウの IME メッセージから取得します。
+  そのため OS 側の候補ウィンドウは表示されません（`ShowCandidatesInGame` を `false` にすると元に戻ります）。
 - ゲーム内キーボードのポインタによる文字入力は対象外です。ゲーム側の UI クリックで IME の変換中文字列が
   確定してしまうため、FPFC / デスクトップミラー + 物理キーボードで操作してください。
 - Beat Saber のバージョンが変わると `InputFieldView` の API が変わる可能性があります。対象は 1.40.8 です。

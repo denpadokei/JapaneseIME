@@ -153,6 +153,7 @@ namespace JapaneseIME
             _nextModeRetryTime = 0f;
 
             AttachKeyboard();
+            ImeMessageHook.EnsureInstalled();
             EnableIme();
             ApplyJapaneseInputMode();
             RefreshDisplay(notify: false, force: true);
@@ -285,6 +286,16 @@ namespace JapaneseIME
 
                 PollCandidates();
 
+                ImeCandidateList pendingCandidates;
+                if (ImeMessageHook.TryTakePending(out pendingCandidates))
+                {
+                    CandidateWindow.Show(pendingCandidates);
+                }
+                else if (ImeMessageHook.TryTakePendingHide())
+                {
+                    CandidateWindow.Hide();
+                }
+
                 // While the on-screen keyboard drove the IME host, the plugin owned
                 // the field text and Unity's own IME bridge had to stay out of the way.
                 // That path is gone: all input now arrives through the field's own IME.
@@ -331,7 +342,17 @@ namespace JapaneseIME
         {
             if (!Plugin.Config.ShowCandidatesInGame)
             {
+                ImeMessageHook.Uninstall();
                 CandidateWindow.Hide();
+                return;
+            }
+
+            ImeMessageHook.EnsureInstalled();
+            if (ImeMessageHook.Installed)
+            {
+                // The window hook receives WM_IME_NOTIFY and updates the overlay
+                // exactly when the IME exposes its candidate list. Polling from
+                // Update does not return candidates on current Windows IMEs.
                 return;
             }
 

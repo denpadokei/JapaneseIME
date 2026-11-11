@@ -60,6 +60,7 @@ namespace JapaneseIME
                 }
 
                 ImeManager.EnsureCreated();
+                ImeMessageHook.EnsureInstalled();
 
                 if (Config.SelfTestMode && ImeManager.Instance != null)
                 {
@@ -80,6 +81,7 @@ namespace JapaneseIME
         {
             try
             {
+                ImeMessageHook.Uninstall();
                 ImeManager.Instance?.Shutdown();
                 Harmony?.UnpatchSelf();
                 ImeManager.DestroyInstance();
