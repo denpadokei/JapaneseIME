@@ -12,6 +12,7 @@
   </PropertyGroup>
   <ItemGroup>
     <EmbeddedResource Include="manifest.json"/>
+    <EmbeddedResource Include="Resources\kanji-dictionary.txt.gz" />
   </ItemGroup>
   <ItemGroup>
     <!-- The helper is a separate process; it must not be compiled into the plugin. -->

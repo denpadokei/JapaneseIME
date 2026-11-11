@@ -75,8 +75,10 @@ Unity の Mono は COM オブジェクトを生成できない（`Type.GetTypeFr
 - 変換できるのは Microsoft IME の辞書に載っている語です。辞書の候補一覧は取得できないため、
   読みをいくつかの短い文脈（`これは○`、`この○`、`○です`、`○か`、`○をする`）で変換し、
   出てきた語を集めて候補にしています（例: `かんじ` → `漢字` / `感じ` / `幹事`）。
+  さらに **JMdict 由来の同音異義語辞書**（プラグインに埋め込み、`Tools/build_dictionary.py` で生成）を
+  引いて足りない候補を追加します（例: `かみ` → `神` / `紙` / `髪`）。
   これにカタカナ・ひらがなを加えたものが候補で、`Space` のたびに切り替わります。
-  文脈によって結果が変わるため、辞書の全候補が出るわけではありません。
+  辞書の候補は JMdict の頻度情報に基づく順序です。全候補を網羅するものではありません。
 - どちらの経路も無い場合は、かな入力のみになります（ログに警告が出ます）。
 - かなに変換するのは、IME が日本語モードのときだけです。`半角英数` モードでは従来どおり半角の英数が入ります。
 - `Backspace` は、変換中なら変換を取り消して読みに戻し、未確定のローマ字（例: `k`）があればそれを 1 文字消し、
@@ -220,3 +222,9 @@ bsmt build .\Japanese_IME.csproj -c Release --package
 
 `Plugins\JapaneseIME.dll`、`Plugins\JapaneseIME.KanjiHost.exe`、`Libs\Natives\JapaneseIME.KanjiNative.dll` を削除し、
 必要なら `UserData\Japanese IME.json` も削除してください。
+
+## ライセンス
+
+このプラグイン本体はリポジトリのライセンスに従います。同梱するかな漢字辞書データは JMdict（EDRDG）由来で
+**CC BY-SA 4.0** です。詳細は [THIRD-PARTY-NOTICES.md](THIRD-PARTY-NOTICES.md) を参照してください。
+

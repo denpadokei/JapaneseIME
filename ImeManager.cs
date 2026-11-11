@@ -313,7 +313,7 @@ namespace JapaneseIME
 
         private static string[] BuildConversionCandidates(string reading)
         {
-            List<string> candidates = new List<string>(4);
+            List<string> candidates = new List<string>(8);
 
             string[] converted;
             if (KanjiConverter.TryConvert(reading, out converted) && converted != null)
@@ -321,6 +321,18 @@ namespace JapaneseIME
                 for (int i = 0; i < converted.Length; i++)
                 {
                     AddCandidate(candidates, converted[i], reading);
+                }
+            }
+
+            // The engine returns the best conversion per context; the dictionary
+            // adds the homophones it never picks (かみ → 神 / 紙 / 髪).
+            string[] known;
+            if (KanjiDictionary.TryLookup(reading, out known) && known != null)
+            {
+                int limit = known.Length < 6 ? known.Length : 6;
+                for (int i = 0; i < limit && candidates.Count < 6; i++)
+                {
+                    AddCandidate(candidates, known[i], reading);
                 }
             }
 
