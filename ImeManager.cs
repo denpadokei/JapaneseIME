@@ -334,23 +334,8 @@ namespace JapaneseIME
                 }
             }
 
-            // 2) The Microsoft IME engine. It runs on a background thread (its first
-            //    start can take seconds); the list is refreshed once it answers.
-            string[] converted;
-            if (KanjiEngine.TryGet(reading, out converted) && converted != null)
-            {
-                for (int i = 0; i < converted.Length && candidates.Count < 6; i++)
-                {
-                    AddCandidate(candidates, converted[i], reading);
-                }
-            }
-            else
-            {
-                KanjiEngine.Request(reading);
-            }
-
-            // 3) The built-in JMdict table fills in the homophones the engine never
-            //    picks (かみ → 神 / 紙 / 髪) and covers offline sessions.
+            // 2) The built-in JMdict table fills in the homophones the API does not
+            //    return and covers offline sessions (かみ → 神 / 紙 / 髪).
             string[] known;
             if (KanjiDictionary.TryLookup(reading, out known) && known != null)
             {
@@ -815,12 +800,6 @@ namespace JapaneseIME
                 if (OnlineDictionary.TryTakeCompleted(out onlineResult))
                 {
                     RefreshConversionWithOnline(onlineResult.Reading);
-                }
-
-                KanjiEngine.Result engineResult;
-                if (KanjiEngine.TryTakeCompleted(out engineResult))
-                {
-                    RefreshConversionWithOnline(engineResult.Reading);
                 }
 
                 // While the on-screen keyboard drove the IME host, the plugin owned

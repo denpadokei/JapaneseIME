@@ -32,9 +32,7 @@ Beat Saber のゲーム内キーボードで、Windows の日本語 IME を使�
 ## インストール
 
 1. Beat Saber を終了します。
-2. `JapaneseIME.dll` を `Beat Saber\Plugins\` に、`JapaneseIME.KanjiNative.dll` を
-   `Beat Saber\Libs\Natives\` にコピーします（予備の `JapaneseIME.KanjiHost.exe` も `Plugins\` に置きます）。
-   （この 2 つはポインタ入力の漢字変換に使います。`KanjiHost.exe` は DLL が無いときの予備です）
+2. `JapaneseIME.dll` を `Beat Saber\Plugins\` にコピーします。
 3. **BSML** (`BSML.dll`) が `Plugins` にない場合は導入します。Mod Assistant / BSManager では
    マニフェストの依存として自動導入されます。
 4. ゲームを起動します。BSIPA のログに次のように出ればロード成功です。
@@ -65,22 +63,15 @@ BSManager を使っている場合は、対象インスタンスの `Plugins` �
 4. `OK` / 検索ボタンで確定します。候補表示中に別のキーを押すと、その候補を確定して入力を続けます。
 
 ゲームはキー入力を入力欄へ直接書き込み、しかも UI をクリックするたびに Windows IME の変換中文字列を確定してしまうため、
-Windows IME の変換は使えません。代わりに **Microsoft IME の変換エンジン（`MSIME.Japan`）** を呼び出して、かなを漢字に変換します。
-Unity の Mono は COM オブジェクトを生成できない（`Type.GetTypeFromProgID` が `NotImplementedException` になる）ため、
-エンジンの呼び出しは次の 2 経路で行います。
-
-1. `Libs\Natives\JapaneseIME.KanjiNative.dll`（C++ / x64、既定）… 専用の STA スレッドで COM を扱う。ゲーム内で完結する。
-2. `Plugins\JapaneseIME.KanjiHost.exe`（予備）… DLL が無い・読み込めない場合に別プロセスで同じ変換を行う。
+Windows IME の変換は使えません。そのため、かなを漢字に変換する候補は **オンライン API** と **内蔵辞書** から集めます。
 
 - 候補は次の順で集めます（重複は除去、最大 8 件）。
   1. **オンライン API**（Google CGI API for Japanese Input）… 既読の読みはキャッシュ。結果が届くと候補一覧が自動で更新されます。
-  2. **Microsoft IME の変換エンジン**（`MSIME.Japan`。`Libs\Natives\JapaneseIME.KanjiNative.dll`、無ければ `Plugins\JapaneseIME.KanjiHost.exe`）
-  3. **内蔵の JMdict 由来辞書** … オフライン時や API が使えないときのフォールバック（例: `かみ` → `神` / `紙` / `髪`）
+  2. **内蔵の JMdict 由来辞書** … オフライン時や API が使えないときのフォールバック（例: `かみ` → `神` / `紙` / `髪`）
 - オンライン API は読み（かな）を `https://www.google.com/transliterate` へ HTTPS で送ります。送信を避けたい場合は
   `UseOnlineDictionary` を `false` にしてください（内蔵辞書のみで動作します）。
-- IME エンジンの初回起動には数秒かかりますが、プラグイン起動時にバックグラウンドで準備するため、`Space` を押したときに
-  ゲームが固まることはありません（準備前に押した場合はオンライン／内蔵辞書の候補が先に出て、準備完了後に一覧が更新されます）。
-- どちらの経路も無い場合は、かな入力のみになります（ログに警告が出ます）。
+- 変換はすべて非同期です。候補はすぐに表示され、オンライン API の結果が届くと一覧が自動で更新されます。
+- どちらの経路も無い場合は、かな入力のみになります。
 - かなに変換するのは、IME が日本語モードのときだけです。`半角英数` モードでは従来どおり半角の英数が入ります。
 - `Backspace` は、変換中なら変換を取り消して読みに戻し、未確定のローマ字（例: `k`）があればそれを 1 文字消し、
   なければ入力済みの文字を消します。
@@ -172,7 +163,8 @@ OS の候補ウィンドウはゲーム内表示と重複しないよう抑制�
 - Unity Input System の `Keyboard.onIMECompositionChange` で変換中文字列を取得し、`Keyboard.onTextInput` で確定文字を取得します。
 - 変換中はゲームの入力欄表示に未確定文字を反映し、確定時にゲーム標準の `onValueChanged` を呼ぶことで、検索などのゲーム側処理に確定文字を渡します。
 - 変換候補の一覧は、ゲームウィンドウの `WM_IME_NOTIFY`（候補の開閉・変更）で `ImmGetCandidateList` から取得し、BSML の `FloatingScreen` 上に表示します。
-- 取得した候補はページ単位で表示し、選択中の候補を強調します。OS の候補ウィンドウはデスクトップ側にそのまま残ります。
+- 取得した候補はページ単位で表示し、選択中の候補を強調します。OS の候補ウィンドウは HMD から見えないため、
+  `WM_IME_SETCONTEXT` の lParam を 0 にして描画させません。
 - Input System が利用できない場合は、従来の `Input.compositionString` / `Input.inputString` にフォールバックします。
 - 旧 `VRTextEntryController` + `UIKeyboard` を使う画面にも対応しています。
 - ゲーム内キーボードのキー入力は、IME が日本語モードのときだけ横取りし、物理キーの信号として送り直します
@@ -186,15 +178,13 @@ dotnet build .\Japanese_IME.csproj -c Release
 ```
 
 GitHub Actions（`.github/workflows/build.yml`）でもビルドできます。CI では
-[`nicoco007/setup-beat-saber`](https://github.com/nicoco007/setup-beat-saber) が `manifest.json` の
-`gameVersion` / `dependsOn` を読み、Beat Saber の参照アセンブリと依存 MOD（BSIPA / BSML）を BeatMods から取得します
-（`BeatSaberDir` が自動設定されます）。そのあと `dotnet build -c Release -p:ContinuousIntegrationBuild=True` を実行し、
+[`nicoco007/setup-beat-saber`](https://github.com/nicoco007/setup-beat-saber) が `Directory.Build.props` の
+`GameVersion` と `DependsOn`（BSIPA 4.3.6 / BeatSaberMarkupLanguage 1.12.5）を読み、Beat Saber の参照アセンブリと
+依存 MOD を BeatMods から取得します（`BeatSaberDir` が自動設定されます）。
+そのあと `dotnet build -c Release -p:ContinuousIntegrationBuild=True` を実行し、
 `bin/Release/Artifact` を `JapaneseIME.zip` にまとめて成果物としてアップロードします。
 
-ビルド時に、Microsoft IME 変換用の `JapaneseIME.KanjiNative.dll`（C++ / x64）を
-`Native\build.ps1` が MSVC でコンパイルし、`JapaneseIME.KanjiHost.exe`（予備）と一緒に
-`Plugins` へコピーします。MSVC（Visual Studio の C++ ビルドツール）が無い環境では
-ネイティブ DLL のビルドはスキップされ、警告だけ出して予備の EXE が使われます。
+
 
 BSMT を使う場合:
 
@@ -220,19 +210,20 @@ bsmt build .\Japanese_IME.csproj -c Release --package
 
 - Windows IME の候補一覧は、OS の候補ウィンドウではなくゲームウィンドウの IME メッセージから取得します。
   OS 側の候補ウィンドウは表示されません（`ShowCandidatesInGame` を `false` にすると元に戻ります）。
-- ゲーム内キーボードのポインタ入力は、内蔵のローマ字 → かな変換と、Microsoft IME の変換エンジン（`MSIME.Japan`）による
-  かな → 漢字変換で行います。同音異義語の候補一覧は取得できないため、候補は「変換結果（最大 2 種）・カタカナ・ひらがな」です。
-  Microsoft IME が入っていない環境では、かな入力のみになります。
+- ゲーム内キーボードのポインタ入力は、内蔵のローマ字 → かな変換と、オンライン API／内蔵辞書による
+  かな → 漢字変換で行います。MS-IME の候補一覧は公開 API から取得できないため、候補はオンライン API と
+  内蔵辞書（JMdict）の語彙に依存します。オンライン API を無効にすると、辞書に載っている語だけが変換できます。
 - Beat Saber のバージョンが変わると `InputFieldView` の API が変わる可能性があります。対象は 1.40.8 です。
 
 ## アンインストール
 
-`Plugins\JapaneseIME.dll`、`Plugins\JapaneseIME.KanjiHost.exe`、`Libs\Natives\JapaneseIME.KanjiNative.dll` を削除し、
+`Plugins\JapaneseIME.dll` を削除し、
 必要なら `UserData\Japanese IME.json` も削除してください。
 
 ## ライセンス
 
 このプラグイン本体はリポジトリのライセンスに従います。同梱するかな漢字辞書データは JMdict（EDRDG）由来で
 **CC BY-SA 4.0** です。詳細は [THIRD-PARTY-NOTICES.md](THIRD-PARTY-NOTICES.md) を参照してください。
+
 
 

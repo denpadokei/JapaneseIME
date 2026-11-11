@@ -15,36 +15,6 @@
     <EmbeddedResource Include="Resources\kanji-dictionary.txt.gz" />
   </ItemGroup>
   <ItemGroup>
-    <!-- The helper is a separate process; it must not be compiled into the plugin. -->
-    <Compile Remove="KanjiHost\**" />
-    <None Remove="KanjiHost\**" />
-  </ItemGroup>
-  <!--
-    Microsoft IME conversion runs in a native DLL when it can be built, and in a
-    helper process otherwise. Both are added to the BSMT outputs so they ship next
-    to the plugin DLL.
-  -->
-  <Target Name="JapaneseIME_BuildNative" BeforeTargets="JapaneseIME_BuildKanjiHost">
-    <Exec Command="powershell -NoProfile -ExecutionPolicy Bypass -File &quot;$(MSBuildProjectDirectory)\Native\build.ps1&quot; -OutputDir &quot;$(MSBuildProjectDirectory)\bin\$(Configuration)&quot; -Configuration $(Configuration) -Platform x64"
-          ContinueOnError="true" />
-  </Target>
-  <Target Name="JapaneseIME_BuildKanjiHost"
-          BeforeTargets="CopyToArtifactDestination;BSMT_CopyToPlugins;BSMT_ZipRelease">
-    <MSBuild Projects="KanjiHost\JapaneseIME.KanjiHost.csproj"
-             Targets="Restore;Build"
-             Properties="Configuration=$(Configuration)" />
-    <ItemGroup>
-      <OutputCopy Include="$(TargetDir)$(AssemblyName).dll" OutputPath="Plugins\$(AssemblyName).dll" />
-      <OutputCopy Include="$(TargetDir)$(AssemblyName).pdb" OutputPath="Plugins\$(AssemblyName).pdb"
-                  Condition="Exists('$(TargetDir)$(AssemblyName).pdb')" />
-      <OutputCopy Include="KanjiHost\bin\$(Configuration)\JapaneseIME.KanjiHost.exe"
-                  OutputPath="Plugins\JapaneseIME.KanjiHost.exe" />
-      <OutputCopy Include="bin\$(Configuration)\JapaneseIME.KanjiNative.dll"
-                  OutputPath="Libs\Natives\JapaneseIME.KanjiNative.dll"
-                  Condition="Exists('$(MSBuildProjectDirectory)\bin\$(Configuration)\JapaneseIME.KanjiNative.dll')" />
-    </ItemGroup>
-  </Target>
-  <ItemGroup>
     <PackageReference Include="BeatSaberModdingTools.Tasks" Version="2.0.0-beta4">
       <PrivateAssets>all</PrivateAssets>
       <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>

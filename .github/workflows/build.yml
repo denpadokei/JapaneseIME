@@ -8,8 +8,6 @@ on:
       - "**/*.csproj"
       - "Directory.Build.props"
       - "manifest.json"
-      - "Native/**"
-      - "KanjiHost/**"
       - "Resources/**"
       - ".github/workflows/build.yml"
   pull_request:
@@ -56,9 +54,7 @@ jobs:
           if (-not (Test-Path $artifact)) { throw "CI output not found: $artifact" }
 
           $required = @(
-            'Plugins/JapaneseIME.dll',
-            'Plugins/JapaneseIME.KanjiHost.exe',
-            'Libs/Natives/JapaneseIME.KanjiNative.dll'
+            'Plugins/JapaneseIME.dll'
           )
 
           $missing = $required | Where-Object { -not (Test-Path (Join-Path $artifact $_)) }
