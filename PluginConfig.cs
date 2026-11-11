@@ -58,6 +58,13 @@ namespace JapaneseIME
         public virtual bool ConvertOnScreenKeyboard { get; set; } = true;
 
         /// <summary>
+        /// Send the keystroke an on-screen key stands for so the Windows IME converts
+        /// it like physical typing (kanji included). Falls back to the romaji converter
+        /// when synthetic input does not reach the IME.
+        /// </summary>
+        public virtual bool SimulatePhysicalKeyboard { get; set; } = true;
+
+        /// <summary>
         /// Width of the extra IME mode key, as a multiple of a normal letter key. It
         /// sits in the free strip right of OK. Clamped to 1.0 - 3.0.
         /// </summary>

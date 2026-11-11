@@ -32,6 +32,11 @@ namespace JapaneseIME
         private string _baseText = string.Empty;
         private string _composition = string.Empty;
         private string _keyboardRomaji = string.Empty;
+        private char _probeChar;
+        private string _probeComposition = string.Empty;
+        private int _probeTextFrame = -1;
+        private float _probeDeadline;
+        private bool _simulationUnavailable;
         private string _lastPreview;
         private bool _sawInputSystemComposition;
         private bool _sawInputSystemText;
@@ -140,6 +145,7 @@ namespace JapaneseIME
             _baseText = target.ReadText() ?? string.Empty;
             _composition = string.Empty;
             _keyboardRomaji = string.Empty;
+            _probeChar = '\0';
             _lastPreview = null;
             _lastTextInputFrame = -1;
             _lastCompositionFrame = -1;
@@ -191,6 +197,9 @@ namespace JapaneseIME
                     return false;
                 }
 
+                VerifySyntheticKeyboard();
+                DetectCommittedComposition();
+
                 int maxLength = _target.MaxLength;
                 if (maxLength > 0 &&
                     _baseText.Length + _composition.Length + _keyboardRomaji.Length >= maxLength)
@@ -199,35 +208,148 @@ namespace JapaneseIME
                     return true;
                 }
 
-                if (RomajiKana.IsRomajiChar(letter))
+                if (Plugin.Config.SimulatePhysicalKeyboard && !_simulationUnavailable)
                 {
-                    _keyboardRomaji += char.ToLowerInvariant(letter);
-
-                    string produced;
-                    string remaining;
-                    RomajiKana.Convert(_keyboardRomaji, IsKatakanaMode(), false, out produced, out remaining);
-
-                    _keyboardRomaji = remaining;
-                    if (produced.Length > 0)
-                    {
-                        _baseText = AppendClamped(_baseText, produced, _target.MaxLength);
-                    }
-                }
-                else
-                {
-                    // Space, digits and other symbols end the pending syllable.
-                    FlushKeyboardRomaji(_target);
-                    _baseText = AppendClamped(_baseText, letter.ToString(), _target.MaxLength);
+                    return HandleWithSyntheticKey(letter, maxLength);
                 }
 
-                RefreshDisplay(notify: true, force: true);
-                return true;
+                return HandleWithRomajiConversion(letter, maxLength);
             }
             catch (Exception ex)
             {
                 LogError(ex);
                 return false;
             }
+        }
+
+        /// <summary>
+        /// Built-in fallback: converts the tap's romaji into kana without the IME.
+        /// </summary>
+        private bool HandleWithRomajiConversion(char letter, int maxLength)
+        {
+            if (_target == null)
+            {
+                return false;
+            }
+
+            if (RomajiKana.IsRomajiChar(letter))
+            {
+                _keyboardRomaji += char.ToLowerInvariant(letter);
+
+                string produced;
+                string remaining;
+                RomajiKana.Convert(_keyboardRomaji, IsKatakanaMode(), false, out produced, out remaining);
+
+                _keyboardRomaji = remaining;
+                if (produced.Length > 0)
+                {
+                    _baseText = AppendClamped(_baseText, produced, maxLength);
+                }
+            }
+            else
+            {
+                // Space, digits and other symbols end the pending syllable.
+                FlushKeyboardRomaji(_target);
+                _baseText = AppendClamped(_baseText, letter.ToString(), maxLength);
+            }
+
+            RefreshDisplay(notify: true, force: true);
+            return true;
+        }
+
+        /// <summary>
+        /// Sends the key a tap stands for so the Windows IME runs its normal romaji to
+        /// kana/kanji flow. The key is verified on the next frames: if the IME does not
+        /// react, the plugin stops simulating and uses its own converter instead.
+        /// </summary>
+        private bool HandleWithSyntheticKey(char letter, int maxLength)
+        {
+            if (_keyboardRomaji.Length > 0)
+            {
+                FlushKeyboardRomaji(_target);
+            }
+
+            if (SyntheticKeyboard.TrySend(letter))
+            {
+                _probeChar = letter;
+                _probeComposition = _composition;
+                _probeTextFrame = _lastTextInputFrame;
+                _probeDeadline = Time.unscaledTime + 0.5f;
+                return true;
+            }
+
+            // Characters without a virtual key (and non-foreground windows) are
+            // inserted directly so a tap never disappears.
+            _baseText = AppendClamped(_baseText, letter.ToString(), maxLength);
+            RefreshDisplay(notify: true, force: true);
+            return true;
+        }
+
+        /// <summary>
+        /// Confirms the synthetic key reached the IME. A tap that produces neither a
+        /// composition nor a committed character means the simulation cannot work in
+        /// this game, so the built-in converter takes over.
+        /// </summary>
+        private void VerifySyntheticKeyboard()
+        {
+            if (_probeChar == '\0')
+            {
+                return;
+            }
+
+            if (_composition != _probeComposition || _lastTextInputFrame != _probeTextFrame)
+            {
+                _probeChar = '\0';
+                return;
+            }
+
+            if (Time.unscaledTime < _probeDeadline)
+            {
+                return;
+            }
+
+            char missed = _probeChar;
+            _probeChar = '\0';
+            _simulationUnavailable = true;
+            Plugin.Log?.Warn(
+                "JapaneseIME: the synthetic key produced no IME input. " +
+                "The on-screen keyboard now uses built-in romaji conversion.");
+
+            // Do not lose the tap that proved the simulation cannot work.
+            if (_target != null && _target.IsAlive)
+            {
+                HandleWithRomajiConversion(missed, _target.MaxLength);
+            }
+        }
+
+        /// <summary>
+        /// If a tap committed the live composition instead of extending it, the IME can
+        /// never build a multi-character reading from pointer input. Falls back to the
+        /// built-in converter for the rest of the session.
+        /// </summary>
+        private void DetectCommittedComposition()
+        {
+            if (_probeChar == '\0' || !IsRomajiLetter(_probeChar))
+            {
+                return;
+            }
+
+            if (_composition.Length > 0 || _lastTextInputFrame == _probeTextFrame)
+            {
+                return;
+            }
+
+            _probeChar = '\0';
+            _simulationUnavailable = true;
+            Plugin.Log?.Warn(
+                "JapaneseIME: the IME composition is committed between taps. " +
+                "The on-screen keyboard now uses built-in romaji conversion.");
+        }
+
+        private static bool IsRomajiLetter(char character)
+        {
+            return (character >= 'a' && character <= 'z') ||
+                   (character >= 'A' && character <= 'Z');
         }
 
         /// <summary>
@@ -243,6 +365,13 @@ namespace JapaneseIME
 
             if (_keyboardRomaji.Length == 0)
             {
+                if (Plugin.Config.SimulatePhysicalKeyboard &&
+                    !_simulationUnavailable &&
+                    SyntheticKeyboard.TrySendBackspace())
+                {
+                    return true;
+                }
+
                 return false;
             }
 
@@ -429,6 +558,7 @@ namespace JapaneseIME
                 }
 
                 PollCandidates();
+                VerifySyntheticKeyboard();
 
                 ImeCandidateList pendingCandidates;
                 if (ImeMessageHook.TryTakePending(out pendingCandidates))
