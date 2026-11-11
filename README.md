@@ -186,9 +186,10 @@ dotnet build .\Japanese_IME.csproj -c Release
 ```
 
 GitHub Actions（`.github/workflows/build.yml`）でもビルドできます。CI では
-`beat-forge/init-beatsaber` で Beat Saber の参照アセンブリ（`manifest.json` の `gameVersion`）を取得し、
-BSML を Release から取得してから `dotnet build -p:BeatSaberDir=... -p:DisableCopyToGame=True` を実行、
-`bin/Release/Artifact` を成果物としてアップロードします。
+[`nicoco007/setup-beat-saber`](https://github.com/nicoco007/setup-beat-saber) が `manifest.json` の
+`gameVersion` / `dependsOn` を読み、Beat Saber の参照アセンブリと依存 MOD（BSIPA / BSML）を BeatMods から取得します
+（`BeatSaberDir` が自動設定されます）。そのあと `dotnet build -c Release -p:ContinuousIntegrationBuild=True` を実行し、
+`bin/Release/Artifact` を `JapaneseIME.zip` にまとめて成果物としてアップロードします。
 
 ビルド時に、Microsoft IME 変換用の `JapaneseIME.KanjiNative.dll`（C++ / x64）を
 `Native\build.ps1` が MSVC でコンパイルし、`JapaneseIME.KanjiHost.exe`（予備）と一緒に

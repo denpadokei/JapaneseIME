@@ -2,73 +2,59 @@ name: Build
 
 on:
   push:
-    branches: [main]
+    branches: [master, main]
+    paths:
+      - "**/*.cs"
+      - "**/*.csproj"
+      - "Directory.Build.props"
+      - "manifest.json"
+      - "Native/**"
+      - "KanjiHost/**"
+      - "Resources/**"
+      - ".github/workflows/build.yml"
   pull_request:
   workflow_dispatch:
-
-concurrency:
-  group: build-${{ github.ref }}
-  cancel-in-progress: true
 
 permissions:
   contents: read
 
 jobs:
   build:
-    name: Build plugin
     runs-on: windows-latest
-    env:
-      DOTNET_NOLOGO: 'true'
-      DOTNET_CLI_TELEMETRY_OPTOUT: 'true'
-      BSML_VERSION: 1.12.5
-      BSML_ASSET: BeatSaberMarkupLanguage-v1.12.5%2Bbs.1.40.0-RELEASE.zip
-
     steps:
-      - name: Checkout
-        uses: actions/checkout@v5
+      - uses: actions/checkout@v7
 
-      - name: Set up .NET
-        uses: actions/setup-dotnet@v5
+      # Reads manifest.json (gameVersion 1.40.8, dependsOn BSIPA + BSML) and
+      # downloads the reference assemblies and those dependencies from BeatMods.
+      # It exports BeatSaberDir/GameDirectory for the build.
+      - name: Set up Beat Saber references
+        uses: nicoco007/setup-beat-saber@v1
         with:
-          dotnet-version: 8.0.x
+          access-token: ${{ secrets.GITHUB_TOKEN }}
+          manifest: ${{ github.workspace }}\manifest.json
 
-      # Fetches stripped Beat Saber assemblies for the version in manifest.json
-      # (gameVersion: 1.40.8) into ./Refs.
-      - name: Fetch Beat Saber references
-        uses: beat-forge/init-beatsaber@v1
-        with:
-          manifest: manifest.json
-          path: Refs
-
-      # BSML is a mod, not part of the game files, so it is downloaded separately.
-      # manifest.json depends on BeatSaberMarkupLanguage ^1.12.5.
-      - name: Fetch BSML
+      - name: Verify Beat Saber references
         shell: pwsh
         run: |
-          $url = "https://github.com/monkeymanboy/BeatSaberMarkupLanguage/releases/download/v$env:BSML_VERSION/$env:BSML_ASSET"
-          $archive = Join-Path $env:RUNNER_TEMP 'bsml.zip'
-          Invoke-WebRequest -Uri $url -OutFile $archive
-          Expand-Archive -Path $archive -DestinationPath (Join-Path $env:RUNNER_TEMP 'bsml') -Force
+          if (-not $env:BeatSaberDir) { throw "BeatSaberDir is not set" }
+          if (-not (Test-Path (Join-Path $env:BeatSaberDir "Libs"))) {
+            throw "Dependency references are missing. Check the setup-beat-saber log."
+          }
+          if (-not (Test-Path (Join-Path $env:BeatSaberDir "Plugins\BSML.dll"))) {
+            throw "BSML.dll is missing. Check that manifest.json depends on BeatSaberMarkupLanguage."
+          }
 
-          $plugins = Join-Path $env:GITHUB_WORKSPACE 'Refs/Plugins'
-          New-Item -ItemType Directory -Force -Path $plugins | Out-Null
-          Copy-Item (Join-Path $env:RUNNER_TEMP 'bsml/Plugins/BSML.dll') $plugins -Force
+      # Native/build.ps1 compiles the converter DLL with MSVC (present on the runner).
+      - name: Build Release
+        run: dotnet build "${{ github.workspace }}\Japanese_IME.csproj" -c Release -p:ContinuousIntegrationBuild=True
 
-          Get-ChildItem 'Refs' | Select-Object Name
-          Get-Item (Join-Path $plugins 'BSML.dll') | Select-Object Name, Length
-
-      # The native converter needs MSVC; Native/build.ps1 locates it with vswhere.
-      - name: Build plugin
-        run: >
-          dotnet build .\Japanese_IME.csproj -c Release
-          -p:BeatSaberDir="${{ github.workspace }}\Refs"
-          -p:DisableCopyToGame=True
-
-      - name: Verify build output
+      # BSMT writes the deployment layout to bin\Release\Artifact (the project
+      # does not append the target framework to the output path).
+      - name: Package release zip
         shell: pwsh
         run: |
-          $artifact = 'bin/Release/Artifact'
-          Get-ChildItem $artifact -Recurse -File | Select-Object FullName, Length
+          $artifact = "bin\Release\Artifact"
+          if (-not (Test-Path $artifact)) { throw "CI output not found: $artifact" }
 
           $required = @(
             'Plugins/JapaneseIME.dll',
@@ -77,14 +63,16 @@ jobs:
           )
 
           $missing = $required | Where-Object { -not (Test-Path (Join-Path $artifact $_)) }
-          if ($missing) {
-            throw "Build output is missing: $($missing -join ', ')"
-          }
+          if ($missing) { throw "Build output is missing: $($missing -join ', ')" }
 
-      - name: Upload plugin
-        uses: actions/upload-artifact@v5
+          New-Item -ItemType Directory -Force -Path "bin\Release\artifacts" | Out-Null
+          Compress-Archive -Path "$artifact\*" -DestinationPath "bin\Release\artifacts\JapaneseIME.zip" -Force
+          Get-ChildItem $artifact -Recurse -File | Select-Object FullName, Length
+
+      - name: Upload build artifact
+        uses: actions/upload-artifact@v7
         with:
           name: JapaneseIME-${{ github.sha }}
-          path: bin/Release/Artifact
+          path: ${{ github.workspace }}\bin\Release\artifacts\JapaneseIME.zip
           if-no-files-found: error
-
+          retention-days: 14
