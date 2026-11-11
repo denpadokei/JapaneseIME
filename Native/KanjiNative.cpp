@@ -8,16 +8,15 @@
 // and the plugin calls into it with a plain C function.
 
 #include <windows.h>
-#include <oleauto.h>
 #include <chrono>
 #include <condition_variable>
 #include <cstring>
+#include <cwchar>
 #include <mutex>
 #include <string>
 #include <vector>
 
 #pragma comment(lib, "ole32.lib")
-#pragma comment(lib, "oleaut32.lib")
 
 namespace
 {
@@ -26,13 +25,25 @@ namespace
 
     const DWORD kRequestConversion = 0x00010000;      // FELANG_REQ_CONV
     const DWORD kCmodeNoInvisibleChar = 0x40000000;   // FELANG_CMODE_NOINVISIBLECHAR
-    const DWORD kClauseFixed = 0x00000010;            // FELANG_CLMN_FIXR
 
-    // A stable prefix that is never converted gives the engine the sentence
-    // context it needs: "にほんご" alone comes back unchanged, "これはにほんご"
-    // becomes "これは日本語".
-    const wchar_t kContext[] = L"これは";
-    const size_t kContextLength = (sizeof(kContext) / sizeof(wchar_t)) - 1;
+    // The engine returns one best sentence per request, so a reading is converted
+    // inside several short sentences. The surrounding kana change which homophone
+    // wins: "これはかんじ" gives 漢字, "このかんじ" gives 感じ and "かんじです"
+    // gives 幹事. Either side of the reading is a kana-only template, which lets
+    // the result be trimmed back to the reading's own conversion.
+    struct Template
+    {
+        const wchar_t *prefix;
+        const wchar_t *suffix;
+    };
+
+    const Template kTemplates[] = {
+        {L"これは", L""},
+        {L"この", L""},
+        {L"", L"です"},
+        {L"", L"か"},
+        {L"", L"をする"},
+    };
 
     const int kStartTimeoutMilliseconds = 5000;
     const int kConvertTimeoutMilliseconds = 1500;
@@ -86,9 +97,23 @@ namespace
 
     State g_state;
 
+    bool HasKanji(const std::wstring &value)
+    {
+        for (size_t i = 0; i < value.size(); i++)
+        {
+            wchar_t c = value[i];
+            if ((c >= 0x4E00 && c <= 0x9FFF) || (c >= 0x3400 && c <= 0x4DBF) || c == 0x3005)
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
     void AddCandidate(std::vector<std::wstring> &candidates, const std::wstring &value, const std::wstring &reading)
     {
-        if (value.empty() || value == reading)
+        if (value.empty() || value == reading || !HasKanji(value))
         {
             return;
         }
@@ -104,14 +129,11 @@ namespace
         candidates.push_back(value);
     }
 
-    bool ConvertWithContext(IFELanguage *language, const std::wstring &reading, std::wstring &output)
+    bool ConvertTemplate(IFELanguage *language, const std::wstring &reading, const Template &pattern,
+                         std::wstring &output)
     {
-        std::wstring input = kContext + reading;
-        std::vector<DWORD> clauses(input.size());
-        for (size_t i = 0; i < clauses.size(); i++)
-        {
-            clauses[i] = i < kContextLength ? kClauseFixed : 0;
-        }
+        std::wstring input = std::wstring(pattern.prefix) + reading + pattern.suffix;
+        std::vector<DWORD> clauses(input.size(), 0);
 
         MorphResult *result = nullptr;
         HRESULT hr = language->vtbl->GetJMorphResult(language, kRequestConversion, kCmodeNoInvisibleChar,
@@ -127,9 +149,14 @@ namespace
             result->outputLength <= input.size() * 4)
         {
             std::wstring text(result->output, result->outputLength);
-            if (text.size() > kContextLength && text.compare(0, kContextLength, kContext) == 0)
+            size_t prefixLength = wcslen(pattern.prefix);
+            size_t suffixLength = wcslen(pattern.suffix);
+
+            if (text.size() > prefixLength + suffixLength &&
+                text.compare(0, prefixLength, pattern.prefix) == 0 &&
+                text.compare(text.size() - suffixLength, suffixLength, pattern.suffix) == 0)
             {
-                output = text.substr(kContextLength);
+                output = text.substr(prefixLength, text.size() - prefixLength - suffixLength);
                 converted = !output.empty();
             }
         }
@@ -138,45 +165,17 @@ namespace
         return converted;
     }
 
-    bool ConvertDirect(IFELanguage *language, const std::wstring &reading, std::wstring &output)
-    {
-        BSTR input = SysAllocString(reading.c_str());
-        if (input == nullptr)
-        {
-            return false;
-        }
-
-        BSTR result = nullptr;
-        HRESULT hr = language->vtbl->GetConversion(language, input, 1, -1, &result);
-        SysFreeString(input);
-
-        bool converted = SUCCEEDED(hr) && result != nullptr && SysStringLen(result) > 0;
-        if (converted)
-        {
-            output.assign(result, SysStringLen(result));
-        }
-
-        if (result != nullptr)
-        {
-            SysFreeString(result);
-        }
-
-        return converted;
-    }
-
     std::wstring BuildReply(IFELanguage *language, const std::wstring &reading)
     {
         std::vector<std::wstring> candidates;
 
-        std::wstring value;
-        if (ConvertWithContext(language, reading, value))
+        for (size_t i = 0; i < sizeof(kTemplates) / sizeof(kTemplates[0]); i++)
         {
-            AddCandidate(candidates, value, reading);
-        }
-
-        if (ConvertDirect(language, reading, value))
-        {
-            AddCandidate(candidates, value, reading);
+            std::wstring value;
+            if (ConvertTemplate(language, reading, kTemplates[i], value))
+            {
+                AddCandidate(candidates, value, reading);
+            }
         }
 
         std::wstring reply;

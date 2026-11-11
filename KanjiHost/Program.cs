@@ -16,8 +16,18 @@ namespace JapaneseIME.KanjiHost
     {
         private const uint FelangReqConv = 0x00010000;
         private const uint FelangCmodeNoInvisibleChar = 0x40000000;
-        private const uint FelangClmnFixr = 0x00000010;
-        private const string Context = "これは";
+
+        // The engine answers with one best sentence, so the reading is converted
+        // inside several short kana sentences: "これはかんじ" gives 漢字,
+        // "このかんじ" gives 感じ and "かんじです" gives 幹事.
+        private static readonly string[][] Templates =
+        {
+            new[] { "これは", string.Empty },
+            new[] { "この", string.Empty },
+            new[] { string.Empty, "です" },
+            new[] { string.Empty, "か" },
+            new[] { string.Empty, "をする" },
+        };
 
         [STAThread]
         private static int Main()
@@ -66,27 +76,41 @@ namespace JapaneseIME.KanjiHost
 
         private static List<string> BuildCandidates(IFELanguage language, string reading)
         {
-            List<string> candidates = new List<string>(3);
+            List<string> candidates = new List<string>(Templates.Length);
 
             if (string.IsNullOrEmpty(reading))
             {
                 return candidates;
             }
 
-            AddCandidate(candidates, ConvertWithContext(language, reading), reading);
-
-            string direct;
-            if (language.GetConversion(reading, 1, -1, out direct) >= 0)
+            foreach (string[] template in Templates)
             {
-                AddCandidate(candidates, direct, reading);
+                string value;
+                if (TryConvert(language, template[0], reading, template[1], out value))
+                {
+                    AddCandidate(candidates, value, reading);
+                }
             }
 
             return candidates;
         }
 
+        private static bool HasKanji(string value)
+        {
+            foreach (char c in value)
+            {
+                if ((c >= 0x4E00 && c <= 0x9FFF) || (c >= 0x3400 && c <= 0x4DBF) || c == 0x3005)
+                {
+                    return true;
+                }
+            }
+
+            return false;
+        }
+
         private static void AddCandidate(List<string> candidates, string value, string reading)
         {
-            if (string.IsNullOrEmpty(value) || value == reading || candidates.Contains(value))
+            if (string.IsNullOrEmpty(value) || value == reading || !HasKanji(value) || candidates.Contains(value))
             {
                 return;
             }
@@ -94,9 +118,11 @@ namespace JapaneseIME.KanjiHost
             candidates.Add(value);
         }
 
-        private static string ConvertWithContext(IFELanguage language, string reading)
+        private static bool TryConvert(IFELanguage language, string prefix, string reading, string suffix, out string output)
         {
-            string input = Context + reading;
+            output = null;
+
+            string input = prefix + reading + suffix;
             IntPtr info = Marshal.AllocHGlobal(input.Length * 4);
             IntPtr pointer = IntPtr.Zero;
 
@@ -104,7 +130,7 @@ namespace JapaneseIME.KanjiHost
             {
                 for (int i = 0; i < input.Length; i++)
                 {
-                    Marshal.WriteInt32(info, i * 4, i < Context.Length ? (int)FelangClmnFixr : 0);
+                    Marshal.WriteInt32(info, i * 4, 0);
                 }
 
                 if (language.GetJMorphResult(
@@ -115,27 +141,30 @@ namespace JapaneseIME.KanjiHost
                         info,
                         out pointer) < 0 || pointer == IntPtr.Zero)
                 {
-                    return null;
+                    return false;
                 }
 
                 MORRSLT result = Marshal.PtrToStructure<MORRSLT>(pointer);
                 if (result.pwchOutput == IntPtr.Zero || result.cchOutput <= 0 ||
                     result.cchOutput > input.Length * 4)
                 {
-                    return null;
+                    return false;
                 }
 
-                string output = Marshal.PtrToStringUni(result.pwchOutput, result.cchOutput);
-                if (output == null || !output.StartsWith(Context, StringComparison.Ordinal))
+                string text = Marshal.PtrToStringUni(result.pwchOutput, result.cchOutput);
+                if (text == null || text.Length <= prefix.Length + suffix.Length ||
+                    !text.StartsWith(prefix, StringComparison.Ordinal) ||
+                    !text.EndsWith(suffix, StringComparison.Ordinal))
                 {
-                    return null;
+                    return false;
                 }
 
-                return output.Substring(Context.Length);
+                output = text.Substring(prefix.Length, text.Length - prefix.Length - suffix.Length);
+                return output.Length > 0;
             }
             catch
             {
-                return null;
+                return false;
             }
             finally
             {
