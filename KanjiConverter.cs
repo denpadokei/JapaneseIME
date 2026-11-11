@@ -11,9 +11,10 @@ namespace JapaneseIME
     /// Converts a kana reading to kanji with the Microsoft IME conversion engine.
     ///
     /// Pointer taps cannot use the Windows IME: Beat Saber commits the IME composition
-    /// on every UI click, so a reading can never be accumulated for conversion. The IME
-    /// engine is reached through a small helper process because Unity's Mono cannot use
-    /// COM directly.
+    /// on every UI click, so a reading can never be accumulated for conversion. The
+    /// engine is reached through <see cref="NativeKanjiConverter"/> when the native DLL
+    /// is present, or through a small helper process otherwise, because Unity's Mono
+    /// cannot create COM objects by itself.
     /// </summary>
     internal static class KanjiConverter
     {
@@ -44,7 +45,19 @@ namespace JapaneseIME
         {
             candidates = null;
 
-            if (string.IsNullOrEmpty(reading) || _unavailable)
+            if (string.IsNullOrEmpty(reading))
+            {
+                return false;
+            }
+
+            // The native DLL runs the engine in this process; the helper process
+            // is only started when it is missing or broken.
+            if (NativeKanjiConverter.EnsureAvailable())
+            {
+                return NativeKanjiConverter.TryConvert(reading, out candidates);
+            }
+
+            if (_unavailable)
             {
                 return false;
             }

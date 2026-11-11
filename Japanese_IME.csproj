@@ -19,9 +19,14 @@
     <None Remove="KanjiHost\**" />
   </ItemGroup>
   <!--
-    Microsoft IME conversion runs in a helper process because Unity's Mono cannot
-    use COM. Build it and add it to the BSMT outputs so it ships next to the DLL.
+    Microsoft IME conversion runs in a native DLL when it can be built, and in a
+    helper process otherwise. Both are added to the BSMT outputs so they ship next
+    to the plugin DLL.
   -->
+  <Target Name="JapaneseIME_BuildNative" BeforeTargets="JapaneseIME_BuildKanjiHost">
+    <Exec Command="powershell -NoProfile -ExecutionPolicy Bypass -File &quot;$(MSBuildProjectDirectory)\Native\build.ps1&quot; -OutputDir &quot;$(MSBuildProjectDirectory)\bin\$(Configuration)&quot; -Configuration $(Configuration) -Platform x64"
+          ContinueOnError="true" />
+  </Target>
   <Target Name="JapaneseIME_BuildKanjiHost"
           BeforeTargets="CopyToArtifactDestination;BSMT_CopyToPlugins;BSMT_ZipRelease">
     <MSBuild Projects="KanjiHost\JapaneseIME.KanjiHost.csproj"
@@ -33,6 +38,9 @@
                   Condition="Exists('$(TargetDir)$(AssemblyName).pdb')" />
       <OutputCopy Include="KanjiHost\bin\$(Configuration)\JapaneseIME.KanjiHost.exe"
                   OutputPath="Plugins\JapaneseIME.KanjiHost.exe" />
+      <OutputCopy Include="bin\$(Configuration)\JapaneseIME.KanjiNative.dll"
+                  OutputPath="Libs\Natives\JapaneseIME.KanjiNative.dll"
+                  Condition="Exists('$(MSBuildProjectDirectory)\bin\$(Configuration)\JapaneseIME.KanjiNative.dll')" />
     </ItemGroup>
   </Target>
   <ItemGroup>

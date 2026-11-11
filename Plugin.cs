@@ -83,6 +83,7 @@ namespace JapaneseIME
             {
                 ImeMessageHook.Uninstall();
                 KanjiConverter.Shutdown();
+                NativeKanjiConverter.Shutdown();
                 ImeManager.Instance?.Shutdown();
                 Harmony?.UnpatchSelf();
                 ImeManager.DestroyInstance();
