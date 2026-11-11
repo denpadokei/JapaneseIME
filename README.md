@@ -185,6 +185,11 @@ OS の候補ウィンドウはゲーム内表示と重複しないよう抑制�
 dotnet build .\Japanese_IME.csproj -c Release
 ```
 
+GitHub Actions（`.github/workflows/build.yml`）でもビルドできます。CI では
+`beat-forge/init-beatsaber` で Beat Saber の参照アセンブリ（`manifest.json` の `gameVersion`）を取得し、
+BSML を Release から取得してから `dotnet build -p:BeatSaberDir=... -p:DisableCopyToGame=True` を実行、
+`bin/Release/Artifact` を成果物としてアップロードします。
+
 ビルド時に、Microsoft IME 変換用の `JapaneseIME.KanjiNative.dll`（C++ / x64）を
 `Native\build.ps1` が MSVC でコンパイルし、`JapaneseIME.KanjiHost.exe`（予備）と一緒に
 `Plugins` へコピーします。MSVC（Visual Studio の C++ ビルドツール）が無い環境では
