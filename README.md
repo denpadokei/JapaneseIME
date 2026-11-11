@@ -13,6 +13,8 @@ Beat Saber のゲーム内キーボードで、Windows の日本語 IME を使�
 - `Space` で変換、`Enter` で確定、`Esc` で変換取消、`Backspace` で編集。
 - `Ctrl+V` でクリップボードの日本語を貼り付け（設定で無効化可能）。
 - 入力欄の文字数上限を尊重します。
+- 曲検索で日本語の部分一致検索ができます。ひらがなとカタカナは区別しません。
+- BetterSongList と併用できます（BetterSongList は必須ではありません）。
 
 ## 必要環境
 
@@ -78,6 +80,17 @@ Windows IME の変換は使えません。そのため、かなを漢字に変�
 - この動作は `ConvertOnScreenKeyboard` で無効にできます。
 
 FPFC（起動引数 `fpfc`）またはデスクトップミラーで、**物理キーボード**を使うと漢字変換まで行えます。
+
+### 日本語での曲検索
+
+曲検索欄に日本語で入力すると、曲名・サブタイトル・アーティスト名の部分一致で絞り込めます。
+
+- ひらがなとカタカナは同じ文字として扱います（例: `よる` で `ヨル` を含む曲名もヒットします）。
+- 全角英数は半角として扱います。
+- 漢字の読み（ふりがな）検索には対応しません。曲名に含まれる文字で検索してください。
+- BetterSongList が入っている場合も動作します。BetterSongList の検索パッチをリフレクションで検出し、
+  複数語の日本語検索をフレーズとして結合しないように調整します。BetterSongList は必須依存ではありません。
+- BetterSongList の「ModBasegameSearch」設定が有効でも、日本語検索時は各語を個別に部分一致します。
 
 ### 日本語入力モード切替キー
 
@@ -166,6 +179,9 @@ OS の候補ウィンドウはゲーム内表示と重複しないよう抑制�
 - 取得した候補はページ単位で表示し、選択中の候補を強調します。OS の候補ウィンドウは HMD から見えないため、
   `WM_IME_SETCONTEXT` の lParam を 0 にして描画させません。
 - Input System が利用できない場合は、従来の `Input.compositionString` / `Input.inputString` にフォールバックします。
+- 曲検索の `LevelFilter.CleanText` / `FilterLevelByText` を Harmony でパッチし、日本語を保持したまま正規化します。
+  BetterSongList の検索パッチはアセンブリ名・型名から動的に検出し、日本語検索時だけ干渉しないようにします
+  （BetterSongList.dll への参照はありません）。
 - 旧 `VRTextEntryController` + `UIKeyboard` を使う画面にも対応しています。
 - ゲーム内キーボードのキー入力は、IME が日本語モードのときだけ横取りし、物理キーの信号として送り直します
   （`SimulatePhysicalKeyboard`）。IME が反応しない場合はローマ字 → かな変換で入力欄へ書き込みます。
@@ -213,7 +229,8 @@ bsmt build .\Japanese_IME.csproj -c Release --package
 - ゲーム内キーボードのポインタ入力は、内蔵のローマ字 → かな変換と、オンライン API／内蔵辞書による
   かな → 漢字変換で行います。MS-IME の候補一覧は公開 API から取得できないため、候補はオンライン API と
   内蔵辞書（JMdict）の語彙に依存します。オンライン API を無効にすると、辞書に載っている語だけが変換できます。
-- Beat Saber のバージョンが変わると `InputFieldView` の API が変わる可能性があります。対象は 1.40.8 です。
+- Beat Saber のバージョンが変わると `InputFieldView` や `LevelFilter` の API が変わる可能性があります。対象は 1.40.8 です。
+- 曲検索は文字列の部分一致のみです。漢字の読み（ふりがな）から曲名を検索することはできません。
 
 ## アンインストール
 

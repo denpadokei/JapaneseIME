@@ -4,7 +4,7 @@
   "name": "Japanese IME",
   "author": "denpadokei",
   "version": "1.4.0",
-  "description": "Enables Windows IME Japanese input (romaji to kana/kanji) in Beat Saber's in-game text fields. Use a physical keyboard while a text field is open.",
+  "description": "Enables Windows IME Japanese input (romaji to kana/kanji) in Beat Saber's in-game text fields and Japanese song search with hiragana/katakana-insensitive partial matching. Use a physical keyboard while a text field is open.",
   "gameVersion": "1.40.8",
   "dependsOn": {
     "BSIPA": "^4.3.6",

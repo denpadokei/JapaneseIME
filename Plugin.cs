@@ -59,6 +59,8 @@ namespace JapaneseIME
                     }
                 }
 
+                JapaneseIME.Patches.JapaneseSearchPatcher.Install(Harmony);
+
                 ImeManager.EnsureCreated();
                 ImeMessageHook.EnsureInstalled();
 
@@ -81,6 +83,7 @@ namespace JapaneseIME
         {
             try
             {
+                JapaneseIME.Patches.JapaneseSearchPatcher.Uninstall();
                 ImeMessageHook.Uninstall();
                 ImeManager.Instance?.Shutdown();
                 Harmony?.UnpatchSelf();
