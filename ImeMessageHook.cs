@@ -13,12 +13,14 @@ namespace JapaneseIME
     internal static class ImeMessageHook
     {
         private const int GwlWndProc = -4;
-        private const int WmImeSetContext = 0x0281;
         private const int WmImeNotify = 0x0282;
         private const int ImnChangeCandidate = 0x0003;
         private const int ImnCloseCandidate = 0x0004;
         private const int ImnOpenCandidate = 0x0005;
         private const int GcsCompStr = 0x0008;
+
+        /// <summary>Deepest nesting of our handler before it only forwards messages.</summary>
+        private const int MaxHandlerDepth = 3;
 
         [UnmanagedFunctionPointer(CallingConvention.Winapi)]
         private delegate IntPtr WndProcDelegate(IntPtr hWnd, uint msg, IntPtr wParam, IntPtr lParam);
@@ -33,6 +35,9 @@ namespace JapaneseIME
         private static extern IntPtr CallWindowProcW(
             IntPtr previousWndProc, IntPtr hWnd, uint msg, IntPtr wParam, IntPtr lParam);
 
+        [DllImport("user32.dll", CharSet = CharSet.Unicode)]
+        private static extern IntPtr DefWindowProcW(IntPtr hWnd, uint msg, IntPtr wParam, IntPtr lParam);
+
         [DllImport("user32.dll")]
         private static extern bool IsWindow(IntPtr hWnd);
 
@@ -41,15 +46,6 @@ namespace JapaneseIME
 
         [DllImport("imm32.dll")]
         private static extern bool ImmReleaseContext(IntPtr hWnd, IntPtr hIMC);
-
-        [DllImport("imm32.dll")]
-        private static extern IntPtr ImmCreateContext();
-
-        [DllImport("imm32.dll")]
-        private static extern IntPtr ImmAssociateContext(IntPtr hWnd, IntPtr hIMC);
-
-        [DllImport("imm32.dll")]
-        private static extern bool ImmDestroyContext(IntPtr hIMC);
 
         [DllImport("imm32.dll")]
         private static extern int ImmGetCandidateListW(
@@ -62,15 +58,21 @@ namespace JapaneseIME
         // The delegate is a static field so the GC never collects the thunk that the
         // game window now calls.
         private static WndProcDelegate _wndProc;
+        private static IntPtr _hookAddress;
         private static IntPtr _originalWndProc;
+        private static IntPtr _lastKnownOriginal;
         private static IntPtr _window;
         private static IntPtr _context;
-        private static IntPtr _createdContext;
         private static bool _installed;
         private static float _nextErrorLogTime;
         private static ImeCandidateList _pendingCandidates;
         private static bool _hasPendingCandidates;
         private static bool _pendingHide;
+
+        // IME messages can arrive nested inside each other. Handling a nested message
+        // again used to recurse until the stack overflowed, so the depth is capped.
+        [ThreadStatic]
+        private static int _handlerDepth;
 
         internal static bool Installed => _installed;
 
@@ -133,7 +135,22 @@ namespace JapaneseIME
                     return;
                 }
 
+                if (previous == hook)
+                {
+                    // The window already points at our hook: restoring it failed, so
+                    // fall back to the last procedure we know was the game's own.
+                    _hookAddress = hook;
+                    _originalWndProc = _lastKnownOriginal;
+                    _window = window;
+                    _installed = _lastKnownOriginal != IntPtr.Zero;
+                    Plugin.Log?.Warn(
+                        $"JapaneseIME window hook was already installed (recovered={_installed}).");
+                    return;
+                }
+
+                _hookAddress = hook;
                 _originalWndProc = previous;
+                _lastKnownOriginal = previous;
                 _window = window;
                 _installed = true;
                 Plugin.Log?.Info(
@@ -147,22 +164,31 @@ namespace JapaneseIME
 
         internal static void Uninstall()
         {
-            if (!_installed)
+            IntPtr original = _originalWndProc;
+            IntPtr window = _window;
+
+            _installed = false;
+            _window = IntPtr.Zero;
+            _originalWndProc = IntPtr.Zero;
+            _hookAddress = IntPtr.Zero;
+            _context = IntPtr.Zero;
+
+            if (original == IntPtr.Zero || window == IntPtr.Zero)
             {
                 return;
             }
 
             try
             {
-                if (_window != IntPtr.Zero && _originalWndProc != IntPtr.Zero && IsWindow(_window))
+                if (IsWindow(window))
                 {
                     if (IntPtr.Size == 8)
                     {
-                        SetWindowLongPtrW(_window, GwlWndProc, _originalWndProc);
+                        SetWindowLongPtrW(window, GwlWndProc, original);
                     }
                     else
                     {
-                        SetWindowLongW(_window, GwlWndProc, _originalWndProc);
+                        SetWindowLongW(window, GwlWndProc, original);
                     }
                 }
             }
@@ -170,83 +196,57 @@ namespace JapaneseIME
             {
                 Plugin.Log?.Warn("JapaneseIME IME message hook removal failed: " + ex.Message);
             }
-
-            if (_createdContext != IntPtr.Zero)
-            {
-                try
-                {
-                    ImmDestroyContext(_createdContext);
-                }
-                catch
-                {
-                }
-
-                _createdContext = IntPtr.Zero;
-            }
-
-            _installed = false;
-            _window = IntPtr.Zero;
-            _originalWndProc = IntPtr.Zero;
-            _context = IntPtr.Zero;
-            _wndProc = null;
         }
 
         private static IntPtr WndProc(IntPtr hWnd, uint msg, IntPtr wParam, IntPtr lParam)
         {
+            // Read the original first: it must not change in the middle of this call.
+            IntPtr original = _originalWndProc;
+            if (original == IntPtr.Zero || original == _hookAddress)
+            {
+                // Never hand the message back to our own hook; that recursed forever.
+                return DefWindowProcW(hWnd, msg, wParam, lParam);
+            }
+
+            if (msg != WmImeNotify || _handlerDepth >= MaxHandlerDepth)
+            {
+                return CallWindowProcW(original, hWnd, msg, wParam, lParam);
+            }
+
+            _handlerDepth++;
             try
             {
-                if (msg == WmImeSetContext)
-                {
-                    if (wParam != IntPtr.Zero)
-                    {
-                        _context = ImmGetContext(hWnd);
-                        if (_context == IntPtr.Zero)
-                        {
-                            IntPtr created = ImmCreateContext();
-                            if (created != IntPtr.Zero)
-                            {
-                                ImmAssociateContext(hWnd, created);
-                                _context = created;
-                                _createdContext = created;
-                            }
-                        }
-                    }
-                    else
-                    {
-                        SetPendingHide();
-                    }
-
-                    if (Plugin.Config.ShowCandidatesInGame)
-                    {
-                        // Suppress the OS composition/candidate windows: the plugin
-                        // draws the same information inside the game.
-                        lParam = IntPtr.Zero;
-                    }
-                }
-                else if (msg == WmImeNotify)
-                {
-                    int notify = wParam.ToInt32() & 0xFFFF;
-                    if (Plugin.Config.VerboseLogging)
-                    {
-                        Plugin.Log?.Debug($"JapaneseIME WM_IME_NOTIFY notify={notify}.");
-                    }
-
-                    if (notify == ImnOpenCandidate || notify == ImnChangeCandidate)
-                    {
-                        ReadCandidates(hWnd);
-                    }
-                    else if (notify == ImnCloseCandidate)
-                    {
-                        SetPendingHide();
-                    }
-                }
+                HandleNotify(hWnd, wParam);
             }
             catch (Exception ex)
             {
                 LogError(ex);
             }
+            finally
+            {
+                _handlerDepth--;
+            }
 
-            return CallWindowProcW(_originalWndProc, hWnd, msg, wParam, lParam);
+            return CallWindowProcW(original, hWnd, msg, wParam, lParam);
+        }
+
+        private static void HandleNotify(IntPtr hWnd, IntPtr wParam)
+        {
+            int notify = wParam.ToInt32() & 0xFFFF;
+
+            if (Plugin.Config.VerboseLogging)
+            {
+                Plugin.Log?.Debug($"JapaneseIME WM_IME_NOTIFY notify={notify}.");
+            }
+
+            if (notify == ImnOpenCandidate || notify == ImnChangeCandidate)
+            {
+                ReadCandidates(hWnd);
+            }
+            else if (notify == ImnCloseCandidate)
+            {
+                SetPendingHide();
+            }
         }
 
         private static void ReadCandidates(IntPtr hWnd)
@@ -256,7 +256,17 @@ namespace JapaneseIME
                 return;
             }
 
-            IntPtr context = _context != IntPtr.Zero ? _context : ImmGetContext(hWnd);
+            IntPtr context = ImmGetContext(hWnd);
+            bool release = context != IntPtr.Zero;
+            if (release)
+            {
+                _context = context;
+            }
+            else
+            {
+                context = _context;
+            }
+
             if (context == IntPtr.Zero)
             {
                 return;
@@ -292,8 +302,7 @@ namespace JapaneseIME
                     return;
                 }
 
-                int selection = FindSelection(context, list);
-                list.Selection = selection;
+                list.Selection = FindSelection(context, list);
                 SetPending(list);
 
                 if (Plugin.Config.VerboseLogging)
@@ -311,7 +320,7 @@ namespace JapaneseIME
                     Marshal.FreeHGlobal(buffer);
                 }
 
-                if (_context == IntPtr.Zero)
+                if (release)
                 {
                     ImmReleaseContext(hWnd, context);
                 }
@@ -368,7 +377,7 @@ namespace JapaneseIME
             }
 
             _nextErrorLogTime = now + 5f;
-            Plugin.Log?.Error("JapaneseIME IME message error: " + ex.Message);
+            Plugin.Log?.Error("JapaneseIME IME message error: " + ex);
         }
     }
 }

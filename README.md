@@ -87,8 +87,6 @@ FPFC（起動引数 `fpfc`）またはデスクトップミラーで、**物理�
 
 この MOD は Windows IME の候補一覧をゲームウィンドウの IME メッセージ（`WM_IME_NOTIFY`）から読み取り、
 ゲーム内の正面に表示します（`ShowCandidatesInGame`、既定で有効）。
-OS の候補ウィンドウはゲーム内表示と重複しないよう抑制します。`ShowCandidatesInGame` を `false` にすると
-抑制も解除され、従来どおりデスクトップ側に候補ウィンドウが出ます。
 選択中の候補とページ番号も VR 内で確認できます。
 
 ## 設定
@@ -149,7 +147,7 @@ OS の候補ウィンドウはゲーム内表示と重複しないよう抑制�
 - Unity Input System の `Keyboard.onIMECompositionChange` で変換中文字列を取得し、`Keyboard.onTextInput` で確定文字を取得します。
 - 変換中はゲームの入力欄表示に未確定文字を反映し、確定時にゲーム標準の `onValueChanged` を呼ぶことで、検索などのゲーム側処理に確定文字を渡します。
 - 変換候補の一覧は、ゲームウィンドウの `WM_IME_NOTIFY`（候補の開閉・変更）で `ImmGetCandidateList` から取得し、BSML の `FloatingScreen` 上に表示します。
-- 取得した候補はページ単位で表示し、選択中の候補を強調します。OS の候補ウィンドウはゲーム内表示と重複しないよう抑制します。
+- 取得した候補はページ単位で表示し、選択中の候補を強調します。OS の候補ウィンドウはデスクトップ側にそのまま残ります。
 - Input System が利用できない場合は、従来の `Input.compositionString` / `Input.inputString` にフォールバックします。
 - 旧 `VRTextEntryController` + `UIKeyboard` を使う画面にも対応しています。
 - ゲーム内キーボードのキー入力は、IME が日本語モードのときだけ横取りし、ローマ字をかなに変換して入力欄へ書き込みます。
@@ -184,7 +182,7 @@ bsmt build .\Japanese_IME.csproj -c Release --package
 ## 既知の制限
 
 - Windows IME の候補一覧は、OS の候補ウィンドウではなくゲームウィンドウの IME メッセージから取得します。
-  そのため OS 側の候補ウィンドウは表示されません（`ShowCandidatesInGame` を `false` にすると元に戻ります）。
+  OS の候補ウィンドウ自体はデスクトップ（モニター）に表示され続けます。
 - ゲーム内キーボードのポインタ入力で行えるのは、かな入力（ローマ字 → ひらがな / カタカナ）までです。
   漢字への変換は Windows IME を経由する物理キーボード入力で行ってください。
 - Beat Saber のバージョンが変わると `InputFieldView` の API が変わる可能性があります。対象は 1.40.8 です。
