@@ -334,14 +334,19 @@ namespace JapaneseIME
                 }
             }
 
-            // 2) The Microsoft IME engine inside the game process.
+            // 2) The Microsoft IME engine. It runs on a background thread (its first
+            //    start can take seconds); the list is refreshed once it answers.
             string[] converted;
-            if (KanjiConverter.TryConvert(reading, out converted) && converted != null)
+            if (KanjiEngine.TryGet(reading, out converted) && converted != null)
             {
                 for (int i = 0; i < converted.Length && candidates.Count < 6; i++)
                 {
                     AddCandidate(candidates, converted[i], reading);
                 }
+            }
+            else
+            {
+                KanjiEngine.Request(reading);
             }
 
             // 3) The built-in JMdict table fills in the homophones the engine never
@@ -378,13 +383,15 @@ namespace JapaneseIME
         }
 
         /// <summary>
-        /// The online dictionary answered while a reading is still being converted:
-        /// rebuild the list so its candidates can be picked without another key press.
+        /// The online dictionary or the IME engine answered while a reading is still
+        /// being converted: rebuild the list so its candidates can be picked without
+        /// another key press.
         /// </summary>
-        private void RefreshConversionWithOnline(OnlineDictionary.Result result)
+        private void RefreshConversionWithOnline(string reading)
         {
-            if (result == null || _conversionCandidates == null || string.IsNullOrEmpty(_keyboardReading) ||
-                !string.Equals(result.Reading, _keyboardReading, StringComparison.Ordinal))
+            if (string.IsNullOrEmpty(reading) || _conversionCandidates == null ||
+                string.IsNullOrEmpty(_keyboardReading) ||
+                !string.Equals(reading, _keyboardReading, StringComparison.Ordinal))
             {
                 return;
             }
@@ -807,7 +814,13 @@ namespace JapaneseIME
                 OnlineDictionary.Result onlineResult;
                 if (OnlineDictionary.TryTakeCompleted(out onlineResult))
                 {
-                    RefreshConversionWithOnline(onlineResult);
+                    RefreshConversionWithOnline(onlineResult.Reading);
+                }
+
+                KanjiEngine.Result engineResult;
+                if (KanjiEngine.TryTakeCompleted(out engineResult))
+                {
+                    RefreshConversionWithOnline(engineResult.Reading);
                 }
 
                 // While the on-screen keyboard drove the IME host, the plugin owned

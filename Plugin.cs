@@ -62,6 +62,10 @@ namespace JapaneseIME
                 ImeManager.EnsureCreated();
                 ImeMessageHook.EnsureInstalled();
 
+                // The IME engine needs seconds to start the first time; warm it up in
+                // the background so the first Space press in game does not stall.
+                KanjiEngine.Prewarm();
+
                 if (Config.SelfTestMode && ImeManager.Instance != null)
                 {
                     ImeManager.Instance.Activate(new FakeTextTarget(ImeManager.Instance.gameObject));

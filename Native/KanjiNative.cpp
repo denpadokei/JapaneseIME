@@ -45,7 +45,7 @@ namespace
         {L"", L"をする"},
     };
 
-    const int kStartTimeoutMilliseconds = 5000;
+    const int kStartTimeoutMilliseconds = 15000;
     const int kConvertTimeoutMilliseconds = 1500;
 
     // Only the head of MORRSLT is used; the SDK packs it to one byte.
@@ -309,6 +309,14 @@ extern "C" __declspec(dllexport) int JimeGetStatus()
 {
     std::lock_guard<std::mutex> lock(g_state.mutex);
     return g_state.status;
+}
+
+// Starts the STA thread (and therefore the IME engine) without converting
+// anything. The plugin calls this from a background thread at startup so the
+// first Space press does not have to wait for COM initialisation.
+extern "C" __declspec(dllexport) void JimeWarmUp()
+{
+    EnsureStarted();
 }
 
 extern "C" __declspec(dllexport) int JimeConvert(const wchar_t *reading, wchar_t *buffer, int bufferLength)

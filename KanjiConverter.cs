@@ -98,9 +98,29 @@ namespace JapaneseIME
             return candidates != null && candidates.Length > 0;
         }
 
-        /// <summary>Stops the helper process.</summary>
-        internal static void Shutdown()
+        /// <summary>
+        /// Starts the helper process (and its COM engine) without waiting for a
+        /// conversion. Runs off the main thread at plugin start.
+        /// </summary>
+        internal static void Prewarm()
         {
+            if (_unavailable)
+            {
+                return;
+            }
+
+            EnsureThread();
+
+            Job job = new Job { Reading = "\u3042" };
+            lock (Sync)
+            {
+                Jobs.Enqueue(job);
+                Monitor.Pulse(Sync);
+            }
+        }
+
+        /// <summary>Stops the helper process.</summary>
+        internal static void Shutdown()        {
             try
             {
                 _request?.Close();
