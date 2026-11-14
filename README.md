@@ -1,246 +1,136 @@
-# Japanese IME for Beat Saber (1.40.8)
+# JapaneseIME
 
-Beat Saber のゲーム内キーボードで、Windows の日本語 IME を使えるようにする BSIPA プラグインです。
-曲検索・ゲスト名・マルチプレイのサーバー設定など、`InputFieldView` を使う入力欄が対象です。
+[![Build](https://github.com/denpadokei/JapaneseIME/actions/workflows/build.yml/badge.svg)](https://github.com/denpadokei/JapaneseIME/actions/workflows/build.yml)
 
-## できること
+Beat Saber のゲーム内テキスト入力で Windows の日本語 IME を使えるようにする BSIPA プラグインです。曲検索・ゲスト名・マルチプレイのサーバー設定など、`InputFieldView` を使う入力欄が対象で、日本語での曲検索（ひらがな／カタカナを区別しない部分一致）にも対応します。
 
-- 入力欄を開いている間だけ Windows IME を有効にし、閉じると自動で元に戻します。
-- ローマ字入力 → ひらがな → 漢字変換を、いつもの Windows IME（Microsoft IME / Google 日本語入力など）で行えます。
-- 変換中の文字列（未確定文字）をゲーム内の入力欄にそのまま表示します。
-- ゲーム内キーボード（ポインタ入力）のローマ字も、`Space` で漢字に変換できます（Microsoft IME の変換エンジンを使用）。
-- 変換候補の一覧をゲーム内の正面に表示します。選択中の候補は色付きで強調され、複数ページある場合はページ番号も表示されます。
-- `Space` で変換、`Enter` で確定、`Esc` で変換取消、`Backspace` で編集。
-- `Ctrl+V` でクリップボードの日本語を貼り付け（設定で無効化可能）。
-- 入力欄の文字数上限を尊重します。
-- 曲検索で日本語の部分一致検索ができます。ひらがなとカタカナは区別しません。
-- BetterSongList と併用できます（BetterSongList は必須ではありません）。
+## 機能
 
-## 必要環境
+- 入力欄を開いている間だけ Windows IME を有効にし、閉じると元に戻す
+- ローマ字 → ひらがな → 漢字変換を、いつもの Windows IME（Microsoft IME / Google 日本語入力など）で実行
+- 変換中の未確定文字をゲーム内の入力欄にそのまま表示し、確定時にゲーム標準の `onValueChanged` を呼ぶ
+- 変換候補の一覧をゲーム内の正面に表示（選択中の候補を強調、ページ番号も表示）
+- ゲーム内キーボード（ポインタ入力）のローマ字をかなに変換し、`Space` で漢字に変換
+- ゲーム内キーボードに IME の入力モード切替キー（`ひらがな` / `半角英数`）を追加
+- `Space` で変換、`Enter` で確定、`Esc` で変換取消、`Backspace` で編集、`Ctrl+V` で貼り付け
+- 曲検索で日本語の部分一致検索（ひらがな／カタカナ、全角／半角英数を同一視）
+- BetterSongList と併用可能（必須ではありません）
+
+## 動作環境
 
 | 項目 | 内容 |
 | --- | --- |
-| Beat Saber | **1.40.8** (PC / Steam・Oculus・BSManager) |
-| Mod loader | BSIPA 4.3.6 以上 |
-| UI | Beat Saber Markup Language (BSML) **1.12.5 以上** |
+| Beat Saber | 1.40.8 |
+| 依存 MOD | BSIPA 4.3.6 / BeatSaberMarkupLanguage 1.12.5 |
 | OS | Windows 10 / 11 |
-| 入力 | 物理キーボード + 日本語 IME |
-| 表示 | 日本語フォント。**SiraLocalizer** を入れると確実です |
-
-> Beat Saber の標準フォントは日本語グリフを含まない場合があります。
-> 日本語が □ になる場合は SiraLocalizer（日本語ローカライズ MOD）を入れてください。
-> この 1.40.8 環境では SiraLocalizer 2.0.3 で動作確認しています。
+| 入力 | 物理キーボード + 日本語 IME（ゲーム内キーボードのみでも可） |
+| 表示 | 日本語フォント。日本語が □ になる場合は SiraLocalizer などを導入 |
 
 ## インストール
 
-1. Beat Saber を終了します。
-2. `JapaneseIME.dll` を `Beat Saber\Plugins\` にコピーします。
-3. **BSML** (`BSML.dll`) が `Plugins` にない場合は導入します。Mod Assistant / BSManager では
-   マニフェストの依存として自動導入されます。
-4. ゲームを起動します。BSIPA のログに次のように出ればロード成功です。
+1. Beat Saber を 1.40.8 に合わせる (BSManager などのバージョン管理ツールを推奨)
+2. BSIPA と BeatSaberMarkupLanguage をインストールする
+3. GitHub Actions の **Build** ワークフローの Artifact をダウンロードし、`Plugins` フォルダをゲームフォルダへ上書きコピーする
+
+`Plugins\JapaneseIME.dll` が配置され、BSIPA のログに次のように出ればロード成功です。
 
 ```text
-[Japanese IME] JapaneseIME started: Windows IME input is enabled for in-game text fields.
+JapaneseIME started: Windows IME input is enabled for in-game text fields.
 ```
 
-BSManager を使っている場合は、対象インスタンスの `Plugins` フォルダにコピーしてください。
+配布用に zip 化する場合の名前は `JapaneseIME-1.4.0-bs1.40.8.zip` です。
 
 ## 使い方
 
 1. 曲検索など、ゲーム内の文字入力欄を開きます。
 2. Windows IME を日本語入力モードにします（`半角/全角` キー、または `Alt` + `` ` ``）。
 3. ローマ字で入力します。変換中の文字は入力欄に表示されます。
-4. `Space` で変換します。候補一覧がゲーム内の正面に表示されるので、候補を選んで `Enter` で確定します。
+4. `Space` で変換し、候補一覧から選んで `Enter` で確定します。
 5. ゲーム内キーボードの OK / 検索ボタンで決定します。
 
 例: `nihongo` → `Space` → `Enter` で「日本語」。
 
 ### ゲーム内キーボード（ポインタ入力）
 
-ゲーム内キーボードのキーをポインタで押した場合も、**ローマ字がかなに変換され、`Space` で漢字に変換できます**。
+ゲーム内キーボードのキーをポインタで押した場合も、ローマ字がかなに変換され、`Space` で漢字に変換できます。
 
 1. `nihongo` とタップ → 入力欄に `にほんご` が入ります。
-2. `Space` をタップ → 漢字（例: `日本語`）に変換され、候補一覧がゲーム内に表示されます。
+2. `Space` をタップ → 漢字（例: `日本語`）に変換され、候補一覧が表示されます。
 3. もう一度 `Space` をタップすると、漢字 → カタカナ → ひらがな の順に候補が切り替わります。
 4. `OK` / 検索ボタンで確定します。候補表示中に別のキーを押すと、その候補を確定して入力を続けます。
 
-ゲームはキー入力を入力欄へ直接書き込み、しかも UI をクリックするたびに Windows IME の変換中文字列を確定してしまうため、
-Windows IME の変換は使えません。そのため、かなを漢字に変換する候補は **オンライン API** と **内蔵辞書** から集めます。
+ゲームはキー入力を入力欄へ直接書き込み、UI をクリックするたびに Windows IME の変換中文字列を確定してしまうため、Windows IME の変換は使えません。そのため、かなを漢字に変換する候補はオンライン API と内蔵辞書から集めます。
 
 - 候補は次の順で集めます（重複は除去、最大 8 件）。
-  1. **オンライン API**（Google CGI API for Japanese Input）… 既読の読みはキャッシュ。結果が届くと候補一覧が自動で更新されます。
-  2. **内蔵の JMdict 由来辞書** … オフライン時や API が使えないときのフォールバック（例: `かみ` → `神` / `紙` / `髪`）
-- オンライン API は読み（かな）を `https://www.google.com/transliterate` へ HTTPS で送ります。送信を避けたい場合は
-  `UseOnlineDictionary` を `false` にしてください（内蔵辞書のみで動作します）。
+  1. オンライン API（Google CGI API for Japanese Input）… 既読の読みはキャッシュ。結果が届くと候補一覧が自動で更新されます。
+  2. 内蔵の JMdict 由来辞書 … オフライン時や API が使えないときのフォールバック（例: `かみ` → `神` / `紙` / `髪`）
+- オンライン API は読み（かな）を `https://www.google.com/transliterate` へ HTTPS で送ります。送信を避けたい場合は `UseOnlineDictionary` を `false` にしてください。
 - 変換はすべて非同期です。候補はすぐに表示され、オンライン API の結果が届くと一覧が自動で更新されます。
-- どちらの経路も無い場合は、かな入力のみになります。
 - かなに変換するのは、IME が日本語モードのときだけです。`半角英数` モードでは従来どおり半角の英数が入ります。
-- `Backspace` は、変換中なら変換を取り消して読みに戻し、未確定のローマ字（例: `k`）があればそれを 1 文字消し、
-  なければ入力済みの文字を消します。
 - この動作は `ConvertOnScreenKeyboard` で無効にできます。
-
-FPFC（起動引数 `fpfc`）またはデスクトップミラーで、**物理キーボード**を使うと漢字変換まで行えます。
 
 ### 日本語での曲検索
 
-曲検索欄に日本語で入力すると、曲名・サブタイトル・アーティスト名の部分一致で絞り込めます。
-
+- 曲名・サブタイトル・アーティスト名の部分一致で絞り込めます。
 - ひらがなとカタカナは同じ文字として扱います（例: `よる` で `ヨル` を含む曲名もヒットします）。
 - 全角英数は半角として扱います。
 - 漢字の読み（ふりがな）検索には対応しません。曲名に含まれる文字で検索してください。
-- BetterSongList が入っている場合も動作します。BetterSongList の検索パッチをリフレクションで検出し、
-  複数語の日本語検索をフレーズとして結合しないように調整します。BetterSongList は必須依存ではありません。
-- BetterSongList の「ModBasegameSearch」設定が有効でも、日本語検索時は各語を個別に部分一致します。
+- BetterSongList が入っている場合も動作します。BetterSongList の検索パッチをリフレクションで検出し、日本語検索時だけ干渉しないように調整します（BetterSongList.dll への参照はありません）。
 
-### 日本語入力モード切替キー
+### 入力モード切替キー
 
-ゲーム内キーボードの `OK` の右（`0` の左）に、IME の入力モードを切り替えるキーを 1 つ追加します。
-既存キーの置き換えはしません。
+ゲーム内キーボードの `OK` の右（`0` の左）に、IME の入力モードを切り替えるキーを 1 つ追加します。既存キーの置き換えはしません。
 
 | ラベル | タップしたとき |
 | --- | --- |
 | `ひらがな` | `半角英数` へ切り替え |
 | `半角英数` | `ひらがな` へ切り替え |
 
-- ラベルは **実際の Windows IME の状態**を 0.5 秒ごとに読み直して表示します（`次:` は次のモード）。
-- このキーはモードを切り替えるだけで、**文字入力は一切行いません**。
-- このキーで選んだモードは、入力欄を開き直しても維持されます
-  （以降は `ForceJapaneseInput` の自動適用を行いません）。
-
-### VR での注意
-
-この MOD は Windows IME の候補一覧をゲームウィンドウの IME メッセージ（`WM_IME_NOTIFY`）から読み取り、
-ゲーム内の正面に表示します（`ShowCandidatesInGame`、既定で有効）。
-OS の候補ウィンドウはゲーム内表示と重複しないよう抑制します。
-選択中の候補とページ番号も VR 内で確認できます。
-
-## 設定
-
-初回起動時に `UserData\Japanese IME.json` が生成されます。
-
-```json
-{
-  "Enabled": true,
-  "EnableForPasswordFields": false,
-  "EnableClipboardPaste": true,
-  "PlaceCandidateWindowNearField": true,
-  "VerboseLogging": false,
-  "SelfTestMode": false,
-  "ForceJapaneseInput": true,
-  "ReapplyOnFocus": true,
-  "ShowImeModeKey": true,
-  "ShowCandidatesInGame": true,
-  "ConvertOnScreenKeyboard": true,
-  "SimulatePhysicalKeyboard": false,
-  "UseOnlineDictionary": true,
-  "ExtraKeyWidthScale": 1.8
-}
-```
-
-| キー | 既定値 | 説明 |
-| --- | --- | --- |
-| `Enabled` | `true` | MOD 全体の有効/無効 |
-| `EnableForPasswordFields` | `false` | パスワード系入力欄でも IME を有効にする |
-| `EnableClipboardPaste` | `true` | `Ctrl+V` 貼り付けを許可 |
-| `PlaceCandidateWindowNearField` | `true` | IME 候補ウィンドウを入力欄の近くに置く |
-| `VerboseLogging` | `false` | 変換文字列などをログに出す（トラブルシュート用） |
-| `ForceJapaneseInput` | `true` | 入力欄を開いたとき Windows IME をひらがなモードへ切り替える（モード切替キーで選んだ後は適用しない） |
-| `ReapplyOnFocus` | `true` | ゲームにフォーカスが戻ったとき日本語モードを再適用する |
-| `SelfTestMode` | `false` | 入力欄なしで IME イベントをログに出す診断モード。`F9` で入力欄の一覧と書き込みテストを実行 |
-| `ShowImeModeKey` | `true` | ゲーム内キーボードに IME モード切替キーを追加する |
-| `ShowCandidatesInGame` | `true` | 変換候補の一覧をゲーム内の正面に表示する（選択中の候補を強調） |
-| `ConvertOnScreenKeyboard` | `true` | ゲーム内キーボードのローマ字をかなに変換し、`Space` で漢字に変換する |
-| `SimulatePhysicalKeyboard` | `false` | ゲーム内キーボードのキーを物理キーの信号として送る（試験用。UI クリックのたびに IME が確定するため通常は無効） |
-| `UseOnlineDictionary` | `true` | 変換候補をオンライン API（Google CGI API for Japanese Input）から取得する。失敗時は内蔵の JMdict 辞書を使う |
-| `ExtraKeyWidthScale` | `1.8` | 追加キーの幅（通常キーに対する倍率。1.0〜3.0） |
+- ラベルは実際の Windows IME の状態を 0.5 秒ごとに読み直して表示します。
+- このキーはモードを切り替えるだけで、文字入力は一切行いません。
+- このキーで選んだモードは、入力欄を開き直しても維持されます。
 
 ### 「a」が半角の「a」になる場合
 
-`ForceJapaneseInput` が `true` でも IME が英数モードのまま残ることがあります（Windows 側の IME 状態）。
-その場合は入力欄を開いた状態で **`Ctrl` + `Shift` + `J`** を押すと日本語モードを再適用します。
+`ForceJapaneseInput` が `true` でも IME が英数モードのまま残ることがあります（Windows 側の IME 状態）。その場合は入力欄を開いた状態で `Ctrl` + `Shift` + `J` を押すと日本語モードを再適用します。
 
-`ForceJapaneseInput` が `true` のときは、IME が日本語モードになったことを確認するまで 0.75 秒間隔で自動再試行します。
-英語をそのまま入力したい場合は `ForceJapaneseInput` を `false` にしてください。
+## 設定
 
-### 診断モード（`SelfTestMode`）
+初回起動時に `UserData/Japanese IME.json` が生成されます。
 
-`SelfTestMode` を `true` にして起動すると、入力欄を開かなくても IME の変換・確定イベントがログに記録されます。
+| 項目 | 型 | 既定値 | 説明 |
+| --- | --- | --- | --- |
+| Enabled | bool | true | MOD 全体の有効／無効 |
+| EnableForPasswordFields | bool | false | パスワード系入力欄でも IME を有効にする |
+| EnableClipboardPaste | bool | true | `Ctrl+V` 貼り付けを許可 |
+| PlaceCandidateWindowNearField | bool | true | IME 候補ウィンドウを入力欄の近くに置く |
+| VerboseLogging | bool | false | 変換文字列などをログに出す（トラブルシュート用） |
+| SelfTestMode | bool | false | 入力欄なしで IME イベントをログに出す診断モード。`F9` で入力欄の一覧と書き込みテストを実行 |
+| ForceJapaneseInput | bool | true | 入力欄を開いたとき Windows IME をひらがなモードへ切り替える |
+| ReapplyOnFocus | bool | true | ゲームにフォーカスが戻ったとき日本語モードを再適用する |
+| ShowImeModeKey | bool | true | ゲーム内キーボードに IME モード切替キーを追加する |
+| ShowCandidatesInGame | bool | true | 変換候補の一覧をゲーム内の正面に表示する |
+| ConvertOnScreenKeyboard | bool | true | ゲーム内キーボードのローマ字をかなに変換し、`Space` で漢字に変換する |
+| UseOnlineDictionary | bool | true | 変換候補をオンライン API から取得する。失敗時は内蔵の JMdict 辞書を使う |
+| SimulatePhysicalKeyboard | bool | false | ゲーム内キーボードのキーを物理キーの信号として送る（試験用） |
+| ExtraKeyWidthScale | float | 1.8 | 追加キーの幅（通常キーに対する倍率。1.0〜3.0） |
 
-- `F9` を押すと、メモリ上にある `InputFieldView` を列挙し、アクティブな入力欄へ「日本語テスト」を書き込んで結果をログに出します。
-- 入力欄まわりの不具合を切り分けるとき以外は `false` のままにしてください。
-
-## 動作の仕組み
-
-- `HMUI.InputFieldView.ActivateKeyboard` / `DeactivateKeyboard` を Harmony でフックし、入力欄がアクティブな間だけ IME を ON にします。
-- 入力欄を開いた直後に Windows IME を日本語（`IME_CMODE_NATIVE | IME_CMODE_FULLSHAPE | IME_CMODE_ROMAN`）へ切り替えます。Unity は IME の「入力受付」を有効にするだけで、かな入力モードまでは選ばないため、この処理がないと `a` が半角の `a` のままになります。
-- Unity Input System の `Keyboard.onIMECompositionChange` で変換中文字列を取得し、`Keyboard.onTextInput` で確定文字を取得します。
-- 変換中はゲームの入力欄表示に未確定文字を反映し、確定時にゲーム標準の `onValueChanged` を呼ぶことで、検索などのゲーム側処理に確定文字を渡します。
-- 変換候補の一覧は、ゲームウィンドウの `WM_IME_NOTIFY`（候補の開閉・変更）で `ImmGetCandidateList` から取得し、BSML の `FloatingScreen` 上に表示します。
-- 取得した候補はページ単位で表示し、選択中の候補を強調します。OS の候補ウィンドウは HMD から見えないため、
-  `WM_IME_SETCONTEXT` の lParam を 0 にして描画させません。
-- Input System が利用できない場合は、従来の `Input.compositionString` / `Input.inputString` にフォールバックします。
-- 曲検索の `LevelFilter.CleanText` / `FilterLevelByText` を Harmony でパッチし、日本語を保持したまま正規化します。
-  BetterSongList の検索パッチはアセンブリ名・型名から動的に検出し、日本語検索時だけ干渉しないようにします
-  （BetterSongList.dll への参照はありません）。
-- 旧 `VRTextEntryController` + `UIKeyboard` を使う画面にも対応しています。
-- ゲーム内キーボードのキー入力は、IME が日本語モードのときだけ横取りし、物理キーの信号として送り直します
-  （`SimulatePhysicalKeyboard`）。IME が反応しない場合はローマ字 → かな変換で入力欄へ書き込みます。
-  追加したモード切替キーはゲームの UI から `Button.onClick` を受け取り、IME のモードを切り替えます。
+入力欄まわりの不具合を切り分けるときは `VerboseLogging` と `SelfTestMode` を有効にしてください。ログは `Beat Saber/Logs/` に出力されます。
 
 ## ビルド
 
 ```powershell
+git clone https://github.com/denpadokei/JapaneseIME.git
+cd JapaneseIME
 dotnet build .\Japanese_IME.csproj -c Release
 ```
 
-GitHub Actions（`.github/workflows/build.yml`）でもビルドできます。CI では
-[`nicoco007/setup-beat-saber`](https://github.com/nicoco007/setup-beat-saber) が `Directory.Build.props` の
-`GameVersion` と `DependsOn`（BSIPA 4.3.6 / BeatSaberMarkupLanguage 1.12.5）を読み、Beat Saber の参照アセンブリと
-依存 MOD を BeatMods から取得します（`BeatSaberDir` が自動設定されます）。
-そのあと `dotnet build -c Release -p:ContinuousIntegrationBuild=True` を実行し、
-`bin/Release/Artifact` を `JapaneseIME.zip` にまとめて成果物としてアップロードします。
+`BeatSaberDir` に Beat Saber のインストール先を設定すると、ゲームの参照アセンブリを解決できます。
 
-
-
-BSMT を使う場合:
-
-```powershell
-bsmt build .\Japanese_IME.csproj -c Release --package
-```
-
-`bin\Release\zip\` に配布用 ZIP が生成されます。
-
-## トラブルシューティング
-
-| 症状 | 確認すること |
-| --- | --- |
-| 日本語が入力できない | ゲームウィンドウにフォーカスがあるか。Windows IME が日本語モードか。 |
-| 日本語が □ になる | SiraLocalizer を入れる。 |
-| 変換候補が見えない | `ShowCandidatesInGame` が `true` か。`Space` で変換して候補一覧が出ているか。`VerboseLogging` を `true` にすると `IMe candidates:` のログが出る。 |
-| 入力欄を開いても IME がオンにならない | `UserData\Japanese IME.json` の `Enabled` が `true` か。BSIPA ログに `activated for ...` が出るか。 |
-| 特定の入力欄だけで動かない | その画面が `InputFieldView` を使っているか。パスワード欄は既定で対象外。 |
-
-ログは `Beat Saber\Logs\` に出力されます。`VerboseLogging` を `true` にすると変換内容が記録されます。
-
-## 既知の制限
-
-- Windows IME の候補一覧は、OS の候補ウィンドウではなくゲームウィンドウの IME メッセージから取得します。
-  OS 側の候補ウィンドウは表示されません（`ShowCandidatesInGame` を `false` にすると元に戻ります）。
-- ゲーム内キーボードのポインタ入力は、内蔵のローマ字 → かな変換と、オンライン API／内蔵辞書による
-  かな → 漢字変換で行います。MS-IME の候補一覧は公開 API から取得できないため、候補はオンライン API と
-  内蔵辞書（JMdict）の語彙に依存します。オンライン API を無効にすると、辞書に載っている語だけが変換できます。
-- Beat Saber のバージョンが変わると `InputFieldView` や `LevelFilter` の API が変わる可能性があります。対象は 1.40.8 です。
-- 曲検索は文字列の部分一致のみです。漢字の読み（ふりがな）から曲名を検索することはできません。
-
-## アンインストール
-
-`Plugins\JapaneseIME.dll` を削除し、
-必要なら `UserData\Japanese IME.json` も削除してください。
+GitHub Actions の `build.yml` が push ごとにビルドし、`bin/Release/Artifact` を `JapaneseIME.zip` として Artifact にアップロードします（リリースは作成しません）。`Directory.Build.props` の `GameVersion` と `DependsOn` を CI が読み、BeatMods から 1.40.8 の参照アセンブリと BSIPA / BSML を取得します。
 
 ## ライセンス
 
-このプラグイン本体はリポジトリのライセンスに従います。同梱するかな漢字辞書データは JMdict（EDRDG）由来で
-**CC BY-SA 4.0** です。詳細は [THIRD-PARTY-NOTICES.md](THIRD-PARTY-NOTICES.md) を参照してください。
+ライセンスファイルはありません。
 
-
-
+同梱するかな漢字辞書データは JMdict（EDRDG）由来で **CC BY-SA 4.0** です。詳細は [THIRD-PARTY-NOTICES.md](THIRD-PARTY-NOTICES.md) を参照してください。
